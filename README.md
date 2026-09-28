@@ -6,7 +6,7 @@ implementation demonstrates the **Hyperledger Iroha v1 Classic Architecture**,
 walking a single transaction through validation, ordering, consensus, and
 commit.
 
-## Features
+## 📄 Features
 
 - Interactive Iroha v1 architecture visualization with component-level detail
 - Animated transaction progression through the architecture diagram
@@ -29,7 +29,7 @@ For official information about Hyperledger Iroha, visit the
 Note: This simulator is an independent educational project and is not maintained by
 or affiliated with the Linux Foundation or LF Decentralized Trust.
 
-## Current Demonstration
+## 🔎 Current Demonstration
 
 - Alice begins with 100 USD and Bob with 20 USD
 - Alice submits a 10 USD transfer to Bob
@@ -46,7 +46,7 @@ or affiliated with the Linux Foundation or LF Decentralized Trust.
 | --- | --- |
 | ![Architecture selection landing page](public/screenshots/landing.png) | ![Iroha architecture and transaction simulator](public/screenshots/simulator.png) |
 
-## Tech Stack
+## ⚙️ Tech Stack
 
 ### Frontend
 - **React** — component-based user interface
@@ -66,9 +66,10 @@ or affiliated with the Linux Foundation or LF Decentralized Trust.
 ### Testing
 - **Vitest** — unit and integration testing
 - **Playwright** — end-to-end browser testing
-## Setup
 
-**Live Demo:** [Open the deployed simulator](https://sasi-1902.github.io/Blockchain-Architecture-Simulator/)
+## 🖥️ Setup
+
+▶️ **Live Demo:** [Open the deployed simulator](https://sasi-1902.github.io/Blockchain-Architecture-Simulator/)
 
 ### Local development
 
@@ -89,7 +90,7 @@ npm run e2e
 npm run verify
 ```
 
-## Future Work
+## 📎 Future Work
 
 1. More transaction/use-case scenarios, including smart-contract and
    failure-path demonstrations.
