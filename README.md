@@ -25,7 +25,8 @@ what the simulator demonstrates step by step.
 
 For official information about Hyperledger Iroha, visit the
 [LF Decentralized Trust Hyperledger Iroha project page](https://lfdecentralizedtrust.org/projects/iroha).
-This simulator is an independent educational project and is not maintained by
+
+Note: This simulator is an independent educational project and is not maintained by
 or affiliated with the Linux Foundation or LF Decentralized Trust.
 
 ## Current Demonstration
@@ -39,7 +40,7 @@ or affiliated with the Linux Foundation or LF Decentralized Trust.
 - Another transaction can be executed to observe additional committed blocks
   and cumulative balances
 
-## UI Snapshots
+## Simulator Snapshots
 
 | Architecture selection | Iroha simulator |
 | --- | --- |
@@ -47,21 +48,27 @@ or affiliated with the Linux Foundation or LF Decentralized Trust.
 
 ## Tech Stack
 
-- React
-- TypeScript
-- Vite
-- React Flow (`@xyflow/react`)
-- XState
-- Zustand
-- Zod
-- Tailwind CSS
-- Motion
-- Vitest
-- Playwright
+### Frontend
+- **React** — component-based user interface
+- **TypeScript** — type-safe application development
+- **Vite** — development server and production build tooling
+- **Tailwind CSS** — utility-first styling and layout
+- **Motion** — UI transitions and animation
 
+### Architecture Visualization
+- **React Flow (`@xyflow/react`)** — interactive architecture graph, nodes, edges, and transaction-path visualization
+
+### State and Simulation
+- **XState** — transaction simulation state machine and step progression
+- **Zustand** — lightweight application-level UI and navigation state
+- **Zod** — runtime validation of architecture and scenario data
+
+### Testing
+- **Vitest** — unit and integration testing
+- **Playwright** — end-to-end browser testing
 ## Setup
 
-**Live Demo:** [Click here to open the deployed simulator](https://sasi-1902.github.io/Blockchain-Architecture-Simulator/)
+**Live Demo:** [Open the deployed simulator](https://sasi-1902.github.io/Blockchain-Architecture-Simulator/)
 
 ### Local development
 
@@ -89,12 +96,14 @@ npm run verify
 2. Peer/node network visualization showing message and consensus propagation.
 3. Additional blockchain architectures, including Iroha 2 and other
    platforms.
-4. Interactive cryptographic and blockchain-concept demonstrations such as
-   signatures, hashing, multisignature flows, and related concepts.
 
 ## Author
 
-Built and maintained by Sasi Deepika Eluri — GitHub: [@sasi-1902](https://github.com/sasi-1902)
+**Sasi Deepika Eluri**
+
+- [GitHub](https://github.com/sasi-1902)
+- [LinkedIn](https://www.linkedin.com/in/sasi-deepika-eluri/)
+- Email: [esasideepika@gmail.com](mailto:esasideepika@gmail.com)
 
 ## License
 
