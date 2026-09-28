@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #f6f4ee;
+  --color-surface: #fffdf8;
+  --color-ink: #171717;
+  --color-muted: #66615a;
+
+  --color-green-soft: #e3f1e6;
+  --color-green-accent: #15b8a6;
+
+  --color-yellow-soft: #fff0bd;
+
+  --color-purple-soft: #e9e0f4;
+  --color-purple-accent: #7657a5;
+
+  --color-transaction-red: #d94a4a;
+
+  --color-canvas-dark: #141414;
+  --color-canvas-grid: #2b2b2b;
+  --color-canvas-ink: #f1efe8;
+
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-ink);
+  }
+}
+
+@layer components {
+  /* Bordered panel: the base editorial card used throughout the app. */
+  .panel {
+    background-color: var(--color-surface);
+    border: 2px solid var(--color-ink);
+    border-radius: 16px;
+    box-shadow: 4px 4px 0 0 var(--color-ink);
+  }
+
+  .panel-flat {
+    background-color: var(--color-surface);
+    border: 2px solid var(--color-ink);
+    border-radius: 16px;
+  }
+
+  /* Dark viewport for the architecture canvas only -- the surrounding app stays off-white. */
+  .panel-canvas-dark {
+    background-color: var(--color-canvas-dark);
+    border: 2px solid var(--color-ink);
+    border-radius: 16px;
+  }
+
+  /* Outlined button: black border, transparent fill, mono uppercase label. */
+  .btn-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 2px solid var(--color-ink);
+    border-radius: 10px;
+    padding: 0.5rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-ink);
+    background-color: var(--color-surface);
+    transition:
+      transform 0.12s ease,
+      box-shadow 0.12s ease,
+      opacity 0.12s ease;
+    box-shadow: 3px 3px 0 0 var(--color-ink);
+  }
+
+  .btn-outline:hover:not(:disabled) {
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0 0 var(--color-ink);
+  }
+
+  .btn-outline:active:not(:disabled) {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 0 var(--color-ink);
+  }
+
+  .btn-outline:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+    box-shadow: none;
+  }
+
+  /* Accent button: filled teal, for the primary call to action. */
+  .btn-accent {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 2px solid var(--color-ink);
+    border-radius: 10px;
+    padding: 0.625rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-ink);
+    background-color: var(--color-green-accent);
+    transition:
+      transform 0.12s ease,
+      box-shadow 0.12s ease,
+      opacity 0.12s ease;
+    box-shadow: 3px 3px 0 0 var(--color-ink);
+  }
+
+  .btn-accent:hover:not(:disabled) {
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0 0 var(--color-ink);
+  }
+
+  .btn-accent:active:not(:disabled) {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 0 var(--color-ink);
+  }
+
+  .btn-accent:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+    box-shadow: none;
+  }
+
+  /* Small uppercase mono eyebrow / metadata label. */
+  .label-mono {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-muted);
+  }
+
+  /* Display heading, serif. */
+  .heading-serif {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+  }
+
+  /* Muted explanatory copy. */
+  .text-muted-copy {
+    color: var(--color-muted);
+  }
+}

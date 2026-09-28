@@ -1,2 +1,101 @@
-# Blockchain-Architecture-Simulator
-Interactive educational tool for exploring blockchain transaction pipelines, starting with Hyperledger Iroha v1, with step-by-step simulation and architecture visualization.
+# Blockchain Architecture Simulator
+
+An interactive educational simulator for understanding how blockchain
+transactions move through internal protocol architecture. The current
+implementation demonstrates the **Hyperledger Iroha v1 Classic Architecture**,
+walking a single transaction through validation, ordering, consensus, and
+commit.
+
+## Features
+
+- Interactive Iroha v1 architecture visualization with component-level detail
+- Animated transaction progression through the architecture diagram
+- Stateless and stateful validation
+- Ordering service and proposal flow
+- YAC consensus
+- Commit and block creation
+- World State View updates
+- Repeated transaction and block history
+- Component-level architecture explanations, including inputs, outputs, and
+  related concepts
+
+Hyperledger Iroha v1 uses YAC (Yet Another Consensus) to have peers agree on
+a candidate block before it is committed. This classic architecture model is
+what the simulator demonstrates step by step.
+
+For official information about Hyperledger Iroha, visit the
+[LF Decentralized Trust Hyperledger Iroha project page](https://lfdecentralizedtrust.org/projects/iroha).
+This simulator is an independent educational project and is not maintained by
+or affiliated with the Linux Foundation or LF Decentralized Trust.
+
+## Current Demonstration
+
+- Alice begins with 100 USD and Bob with 20 USD
+- Alice submits a 10 USD transfer to Bob
+- The transaction passes through the Iroha architecture, including
+  validation, ordering, proposal handling, and YAC consensus
+- The committed transaction creates/extends the educational block chain and
+  updates the World State View
+- Another transaction can be executed to observe additional committed blocks
+  and cumulative balances
+
+## UI Snapshots
+
+| Architecture selection | Iroha simulator |
+| --- | --- |
+| ![Architecture selection landing page](public/screenshots/landing.png) | ![Iroha architecture and transaction simulator](public/screenshots/simulator.png) |
+
+## Tech Stack
+
+- React
+- TypeScript
+- Vite
+- React Flow (`@xyflow/react`)
+- XState
+- Zustand
+- Zod
+- Tailwind CSS
+- Motion
+- Vitest
+- Playwright
+
+## Setup
+
+**Live Demo:** [Click here to open the deployed simulator](https://sasi-1902.github.io/Blockchain-Architecture-Simulator/)
+
+### Local development
+
+Requires the Node.js version specified in `.nvmrc`/`package.json` (Node 24).
+
+```bash
+git clone <repository>
+cd Blockchain-Architecture-Simulator
+npm ci
+npm run dev
+```
+
+### Verification
+
+```bash
+npm run test
+npm run e2e
+npm run verify
+```
+
+## Future Work
+
+1. More transaction/use-case scenarios, including smart-contract and
+   failure-path demonstrations.
+2. Peer/node network visualization showing message and consensus propagation.
+3. Additional blockchain architectures, including Iroha 2 and other
+   platforms.
+4. Interactive cryptographic and blockchain-concept demonstrations such as
+   signatures, hashing, multisignature flows, and related concepts.
+
+## Author
+
+Built and maintained by Sasi Deepika Eluri — GitHub: [@sasi-1902](https://github.com/sasi-1902)
+
+## License
+
+Licensed under the MIT License. See [LICENSE](LICENSE).
