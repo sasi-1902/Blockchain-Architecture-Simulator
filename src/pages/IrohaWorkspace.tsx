@@ -3,7 +3,7 @@ import { ArchitectureDiagram, type PhaseLabel } from '../components/diagram/Arch
 import { BlockCreationPanel, type BlockStage, type CommittedBlock } from '../components/diagram/BlockCreationPanel'
 import { ComponentDrawer } from '../components/drawer/ComponentDrawer'
 import { InteractionPanel } from '../components/simulation/InteractionPanel'
-import { UC01InteractionPanel } from '../components/simulation/UC01InteractionPanel'
+import { UC01Workspace } from '../components/uc01/UC01Workspace'
 import {
   selectAppliedTxStateChanges,
   selectCurrentStep,
@@ -20,17 +20,11 @@ interface IrohaWorkspaceProps {
   architecture: BlockchainArchitecture
 }
 
-/**
- * Row headings for the compact snake diagram layout, anchored to this
- * architecture's authored node positions. The first row intentionally has
- * no heading (per human review) -- only the row transitions need one.
- */
 const PHASE_LABELS: PhaseLabel[] = [
   { label: 'Order + verify', anchorComponentId: 'verified-proposal' },
   { label: 'Consensus + commit', anchorComponentId: 'block-creator' },
 ]
 
-/** Maps this architecture's pipeline waypoints onto the generic block-creation stages. */
 const BLOCK_STAGE_BY_COMPONENT: Partial<Record<ComponentId, BlockStage>> = {
   proposal: 'proposal',
   'stateful-validation': 'proposal',
@@ -41,7 +35,6 @@ const BLOCK_STAGE_BY_COMPONENT: Partial<Record<ComponentId, BlockStage>> = {
   'blockstore-wsv': 'committed',
 }
 
-/** Maps this architecture's pipeline waypoints onto a plain-language transaction status. */
 const TRANSACTION_STATUS_BY_COMPONENT: Partial<Record<ComponentId, string>> = {
   torii: 'Submitted',
   'stateless-validation': 'Statelessly validated',
@@ -58,16 +51,24 @@ const TRANSACTION_STATUS_BY_COMPONENT: Partial<Record<ComponentId, string>> = {
 }
 
 // ---------------------------------------------------------------------------
-// ScenarioRunner — keyed by scenario.id so the XState actor remounts
-// on scenario switch, resetting stepIndex without stale scenario context.
+// ScenarioRunner — keyed by scenario.id so the XState actor remounts on switch
 // ---------------------------------------------------------------------------
 
 interface ScenarioRunnerProps {
   architecture: BlockchainArchitecture
   scenario: Scenario
+  selectedScenarioIndex: number
+  onSelectScenario: (index: number) => void
+  goToLanding: () => void
 }
 
-function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
+function ScenarioRunner({
+  architecture,
+  scenario,
+  selectedScenarioIndex,
+  onSelectScenario,
+  goToLanding,
+}: ScenarioRunnerProps) {
   const isSimulationOpen = useAppStore((state) => state.isSimulationOpen)
   const startSimulation = useAppStore((state) => state.startSimulation)
   const closeSimulation = useAppStore((state) => state.closeSimulation)
@@ -86,7 +87,6 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
   const stateChanges = rawStateChanges.flatMap((change) => flattenTxStateChange(change))
   const accumulatedChanges = useMemo(
     () => Object.assign({}, ...rawStateChanges) as Record<string, unknown>,
-    // rawStateChanges is a new array each render; stepIndex is the actual dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [context.stepIndex],
   )
@@ -101,7 +101,6 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
       hasRecordedRunRef.current = true
 
       if (scenario.transactions) {
-        // UC-01: build a multi-transaction committed block from the accumulated changes.
         const blockData = accumulatedChanges.committedBlock as
           | { transactions: Array<{ from: string; to: string; asset: string; amount: string }>; rejectedTransactionIds: string[] }
           | undefined
@@ -157,18 +156,12 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
     [scenario.initialTx],
   )
 
-  // For UC-01: use final balances from the committed block when available, else initial.
   const uc01WorldStateBalances = useMemo(() => {
     if (!scenario.transactions) return {}
-    const blockData = accumulatedChanges.committedBlock as
-      | { finalWorldState?: { balances: Record<string, string> } }
-      | undefined
-    // Fall back through validationOutcome if no committedBlock yet.
     const validationData = accumulatedChanges.validationOutcome as
       | { finalWorldState?: { balances: Record<string, string> } }
       | undefined
-    const balancesStr =
-      blockData?.finalWorldState?.balances ?? validationData?.finalWorldState?.balances
+    const balancesStr = validationData?.finalWorldState?.balances
     if (balancesStr) {
       return Object.fromEntries(Object.entries(balancesStr).map(([k, v]) => [k, Number(v)]))
     }
@@ -190,7 +183,6 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
   const blockStage: BlockStage =
     isSimulationOpen && currentStep ? (BLOCK_STAGE_BY_COMPONENT[currentStep.componentId] ?? 'waiting') : 'waiting'
 
-  // For UC-01's BlockCreationPanel: derive active transactions from the proposal/candidate data.
   const uc01ActiveTransactions = useMemo(() => {
     if (!scenario.transactions) return undefined
     const blockData = accumulatedChanges.candidateBlock as
@@ -199,7 +191,6 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
     const proposalData = accumulatedChanges.proposal as
       | { transactions: Array<{ from: string; to: string; asset: string; amount: string }> }
       | undefined
-    // Use committed txs for candidate/commit stages, all txs for proposal/validation stages.
     const source = blockData ?? proposalData
     return source?.transactions?.map((tx) => ({
       from: tx.from,
@@ -216,44 +207,52 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
 
   const isUC01 = scenario.transactions !== undefined
 
+  // UC-01: render the redesigned full-page workspace
+  if (isUC01) {
+    return (
+      <UC01Workspace
+        architecture={architecture}
+        scenario={scenario}
+        selectedScenarioIndex={selectedScenarioIndex}
+        onSelectScenario={onSelectScenario}
+        goToLanding={goToLanding}
+        currentStep={currentStep}
+        currentStepIndex={context.stepIndex}
+        narrationHistory={narrationHistory}
+        accumulatedChanges={accumulatedChanges}
+        isComplete={isComplete}
+        isPlaying={isPlaying}
+        isAtStart={isAtStart}
+        isSimulationOpen={isSimulationOpen}
+        onStart={handleSend}
+        onReset={handleResetUC01}
+        send={send}
+        totalSteps={scenario.steps.length}
+      />
+    )
+  }
+
+  // UC-00: original grid layout
   return (
     <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,35%)_minmax(0,1fr)]">
       <div className="lg:min-h-0">
-        {isUC01 ? (
-          <UC01InteractionPanel
-            transactions={scenario.transactions}
-            scenarioName={scenario.name}
-            isSimulationOpen={isSimulationOpen}
-            onStart={handleSend}
-            onReset={handleResetUC01}
-            send={send}
-            currentStep={currentStep}
-            currentStepIndex={context.stepIndex}
-            narrationHistory={narrationHistory}
-            accumulatedChanges={accumulatedChanges}
-            isComplete={isComplete}
-            isPlaying={isPlaying}
-            isAtStart={isAtStart}
-          />
-        ) : (
-          <InteractionPanel
-            scenario={scenario}
-            isSimulationOpen={isSimulationOpen}
-            onSend={handleSend}
-            onMakeAnotherTransaction={handleMakeAnotherTransaction}
-            send={send}
-            currentStep={currentStep}
-            currentStepIndex={context.stepIndex}
-            narrationHistory={narrationHistory}
-            stateChanges={stateChanges}
-            isComplete={isComplete}
-            isPlaying={isPlaying}
-            isAtStart={isAtStart}
-            transactionStatus={transactionStatus}
-            showStatefulValidationCheck={showStatefulValidationCheck}
-            currentFromBalance={currentBalances[scenario.initialTx.from] ?? 0}
-          />
-        )}
+        <InteractionPanel
+          scenario={scenario}
+          isSimulationOpen={isSimulationOpen}
+          onSend={handleSend}
+          onMakeAnotherTransaction={handleMakeAnotherTransaction}
+          send={send}
+          currentStep={currentStep}
+          currentStepIndex={context.stepIndex}
+          narrationHistory={narrationHistory}
+          stateChanges={stateChanges}
+          isComplete={isComplete}
+          isPlaying={isPlaying}
+          isAtStart={isAtStart}
+          transactionStatus={transactionStatus}
+          showStatefulValidationCheck={showStatefulValidationCheck}
+          currentFromBalance={currentBalances[scenario.initialTx.from] ?? 0}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto]">
@@ -286,7 +285,7 @@ function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
 }
 
 // ---------------------------------------------------------------------------
-// IrohaWorkspace — outer shell: header, scenario tabs, component drawer
+// IrohaWorkspace — outer shell: for UC-00 adds header + scenario tabs
 // ---------------------------------------------------------------------------
 
 export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
@@ -296,6 +295,7 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
 
   const [selectedScenarioIndex, setSelectedScenarioIndex] = useState(0)
   const scenario = architecture.scenarios[selectedScenarioIndex]
+  const isUC01 = scenario.transactions !== undefined
 
   const componentsById = useMemo(
     () => new Map(architecture.components.map((component) => [component.id, component])),
@@ -306,6 +306,21 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
     ? architecture.concepts.filter((concept) => selectedComponent.relatedConcepts.includes(concept.id))
     : []
 
+  // UC-01 renders its own full-page layout (including its own header)
+  if (isUC01) {
+    return (
+      <ScenarioRunner
+        key={scenario.id}
+        architecture={architecture}
+        scenario={scenario}
+        selectedScenarioIndex={selectedScenarioIndex}
+        onSelectScenario={setSelectedScenarioIndex}
+        goToLanding={goToLanding}
+      />
+    )
+  }
+
+  // UC-00: existing layout with header
   return (
     <main className="flex min-h-screen flex-col gap-4 bg-background p-4 sm:p-6 lg:h-screen lg:overflow-hidden">
       <div className="flex items-center justify-between gap-4">
@@ -328,11 +343,7 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
               aria-selected={i === selectedScenarioIndex}
               type="button"
               onClick={() => setSelectedScenarioIndex(i)}
-              className={
-                i === selectedScenarioIndex
-                  ? 'btn-accent text-sm'
-                  : 'btn-outline text-sm'
-              }
+              className={i === selectedScenarioIndex ? 'btn-accent text-sm' : 'btn-outline text-sm'}
             >
               {i === 0 ? 'UC-00: Happy Path' : 'UC-01: Multi-Transaction'}
             </button>
@@ -340,8 +351,14 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
         </div>
       )}
 
-      {/* key forces ScenarioRunner to remount (and re-create the XState actor) on scenario switch */}
-      <ScenarioRunner key={scenario.id} architecture={architecture} scenario={scenario} />
+      <ScenarioRunner
+        key={scenario.id}
+        architecture={architecture}
+        scenario={scenario}
+        selectedScenarioIndex={selectedScenarioIndex}
+        onSelectScenario={setSelectedScenarioIndex}
+        goToLanding={goToLanding}
+      />
 
       {selectedComponent && (
         <ComponentDrawer
