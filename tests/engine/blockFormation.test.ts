@@ -657,16 +657,30 @@ describe('UC-01-E-12: asset precision out of range throws precondition error', (
 // applyTransactions: postcondition guard rejects unvalidated transactions
 // ---------------------------------------------------------------------------
 
-describe('applyTransactions: negative-balance postcondition guard', () => {
-  it('throws when an unvalidated transaction would produce a negative balance', () => {
-    // alice has 10n but tx debits 50n — this would only happen if the caller bypassed
-    // validateProposal and passed unvalidated transactions directly.
+describe('applyTransactions: per-transaction negative balance guard', () => {
+  it('throws when a single unvalidated transaction debits more than the sender holds', () => {
+    // alice has 10n but tx debits 50n — passes only if validateProposal was bypassed.
     expect(() =>
       applyTransactions({ alice: 10n }, [tx('tx1', 'alice', 'bob', '50')], { USD: 0 }),
     ).toThrow(/negative balance/)
   })
 
-  it('does not throw when all balances remain non-negative', () => {
+  it('throws even when a later transaction would restore the final balance to non-negative', () => {
+    // Regression: postcondition-only check (all balances after all txs) would miss this.
+    // alice: 10n, bob: 100n
+    // tx1: alice→bob 50  → alice goes to -40n (INVALID — debit exceeds balance)
+    // tx2: bob→alice 100 → alice would become 60n, bob 50n (final balances look fine)
+    // With per-transaction checking, tx1's debit is detected before tx2 runs.
+    expect(() =>
+      applyTransactions(
+        { alice: 10n, bob: 100n },
+        [tx('tx1', 'alice', 'bob', '50'), tx('tx2', 'bob', 'alice', '100')],
+        { USD: 0 },
+      ),
+    ).toThrow(/negative balance/)
+  })
+
+  it('does not throw when all debits stay within available balance', () => {
     expect(() =>
       applyTransactions({ alice: 100n }, [tx('tx1', 'alice', 'bob', '30')], { USD: 0 }),
     ).not.toThrow()

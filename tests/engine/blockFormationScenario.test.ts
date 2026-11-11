@@ -432,8 +432,6 @@ describe('UC-01-I-06: candidate-block, consensus-outcome, and committed-block ar
 // ---------------------------------------------------------------------------
 // UC-01-I-07: ScenarioConfig — deterministic height and timestamps
 // ---------------------------------------------------------------------------
-// (tests for valid config inputs — invalid inputs tested in UC-01-I-08 below)
-//
 
 describe('UC-01-I-07: ScenarioConfig injection', () => {
   it('default config produces height=1, prevBlockHash="genesis", createdTime=0', () => {
@@ -535,40 +533,39 @@ describe('UC-01-I-08: ScenarioConfig input validation', () => {
 })
 
 // ---------------------------------------------------------------------------
-// UC-01-I-09: Empty proposal vs all-rejected — distinct narration
+// UC-01-I-09: Empty proposal vs all-rejected — distinct handling
 // ---------------------------------------------------------------------------
 
-describe('UC-01-I-09: empty proposal narration is distinct from all-rejected narration', () => {
-  it('step-7 narration for empty proposal mentions "No transactions were submitted"', () => {
+describe('UC-01-I-09: empty proposal throws; all-rejected produces a full 11-step scenario', () => {
+  it('throws when transactions array is empty — the Ordering Service does not create empty proposals', () => {
     const emptyWorld: WorldState = {
       balances: {},
       accounts: new Set<string>(),
       assets: { USD: 0 },
     }
-    const scenario = generateBlockFormationScenario([], emptyWorld)
-    const sfStep = scenario.steps.find((s) => s.componentId === 'stateful-validation')
-    expect(sfStep?.narration).toContain('No transactions were submitted')
+    expect(() => generateBlockFormationScenario([], emptyWorld)).toThrow(
+      /requires at least one transaction/,
+    )
   })
 
-  it('step-7 narration for all-rejected mentions "fail stateful validation"', () => {
+  it('all-rejected: produces a full 11-step scenario with an empty committed block', () => {
+    // Distinct from the empty-proposal case: transactions WERE submitted and went through
+    // the pipeline; they just all failed stateful validation.
+    const scenario = generateBlockFormationScenario(ALL_REJECT_TXS, WORLD)
+    expect(scenario.steps).toHaveLength(11)
+    const commitStep = scenario.steps.find((s) => s.componentId === 'commit')
+    const block = commitStep?.txStateChanges?.['committedBlock'] as BlockContent
+    expect(block.transactions).toHaveLength(0)
+    expect(block.rejectedTransactionIds).toEqual(['tx1', 'tx2'])
+  })
+
+  it('all-rejected: step-7 narration mentions "fail stateful validation"', () => {
     const scenario = generateBlockFormationScenario(ALL_REJECT_TXS, WORLD)
     const sfStep = scenario.steps.find((s) => s.componentId === 'stateful-validation')
     expect(sfStep?.narration).toContain('fail stateful validation')
   })
 
-  it('step-8 narration for empty proposal does not say "rejected"', () => {
-    const emptyWorld: WorldState = {
-      balances: {},
-      accounts: new Set<string>(),
-      assets: { USD: 0 },
-    }
-    const scenario = generateBlockFormationScenario([], emptyWorld)
-    const vpStep = scenario.steps.find((s) => s.componentId === 'verified-proposal')
-    expect(vpStep?.narration).toContain('no transactions were submitted')
-    expect(vpStep?.narration).not.toContain('were rejected')
-  })
-
-  it('step-8 narration for all-rejected says "were rejected"', () => {
+  it('all-rejected: step-8 narration says "were rejected"', () => {
     const scenario = generateBlockFormationScenario(ALL_REJECT_TXS, WORLD)
     const vpStep = scenario.steps.find((s) => s.componentId === 'verified-proposal')
     expect(vpStep?.narration).toContain('were rejected')

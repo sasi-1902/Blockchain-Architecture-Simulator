@@ -264,12 +264,13 @@ export function validateProposal(
  * Used to compute the World State View after a committed block.
  *
  * @internal — callers MUST supply only transactions from `ValidationOutcome.validTxIds`.
- * Passing unvalidated transactions is a programming error: the function will throw if
- * any balance goes negative, which is the postcondition invariant for committed transactions
- * (a valid transaction can only debit an amount the sender can cover).
+ * Passing unvalidated transactions is a programming error. The function checks the sender
+ * balance IMMEDIATELY after each debit: a negative balance after any single debit throws,
+ * preventing an invalid intermediate debit from being masked by a later credit that happens
+ * to restore the final balance to non-negative.
  *
  * Unlike `validateProposal`, this function does not re-check individual transfer rules;
- * it only applies the balance deltas and asserts the result is non-negative.
+ * it only applies the balance deltas and asserts non-negative after each debit.
  */
 export function applyTransactions(
   initialBalances: Readonly<Record<string, bigint>>,
@@ -281,21 +282,22 @@ export function applyTransactions(
   for (const tx of transactions) {
     const assetPrecision = assets[tx.asset] ?? 0
     const scaled = scaleAmount(tx.amount, assetPrecision)
-    balances.set(tx.from, (balances.get(tx.from) ?? 0n) - scaled)
-    balances.set(tx.to, (balances.get(tx.to) ?? 0n) + scaled)
-  }
+    const newFromBalance = (balances.get(tx.from) ?? 0n) - scaled
 
-  // Postcondition: no balance may go negative after applying committed transactions.
-  // A negative balance means an unvalidated transaction was supplied — only
-  // transactions from ValidationOutcome.validTxIds are safe to pass here.
-  for (const [account, balance] of balances) {
-    if (balance < 0n) {
+    // Check immediately after the debit — before the corresponding credit is applied.
+    // This catches unvalidated transactions whose over-debit might otherwise be hidden
+    // by a later transaction that credits the same account back above zero.
+    if (newFromBalance < 0n) {
       throw new Error(
-        `applyTransactions: account "${account}" reached a negative balance (${balance}) — ` +
+        `applyTransactions: account "${tx.from}" reached a negative balance (${newFromBalance}) ` +
+          `after transaction "${tx.id}" — ` +
           'only pre-validated transactions from ValidationOutcome.validTxIds may be committed. ' +
           'Use validateProposal to determine which transactions are safe to apply.',
       )
     }
+
+    balances.set(tx.from, newFromBalance)
+    balances.set(tx.to, (balances.get(tx.to) ?? 0n) + scaled)
   }
 
   return Object.fromEntries(balances)

@@ -702,10 +702,15 @@ function applyTransactions(
 
 **Internal trusted operation:** Callers MUST supply only transactions whose IDs appear in
 `ValidationOutcome.validTxIds`. Passing unvalidated transactions is a programming error.
-The function enforces a postcondition: if any account balance goes negative after applying
-the supplied transactions, it throws. A valid committed transaction can only debit an amount
-the sender can cover (guaranteed by `validateProposal`), so negative balances indicate
-unvalidated input bypassed the execution engine.
+The function checks the sender's balance **immediately after each debit**, before the
+corresponding credit is applied. This catches unvalidated over-debits that a final-state
+postcondition would miss: if tx-A debits more than the sender holds and tx-B happens to
+credit the same account back above zero, the final balances look non-negative but tx-A's
+debit was invalid. Per-transaction checking throws on tx-A before tx-B ever runs.
+
+A valid committed transaction can only debit an amount the sender can cover (guaranteed by
+`validateProposal`), so a negative intermediate balance always indicates unvalidated input
+that bypassed the execution engine.
 
 `computeCumulativeBalances` is kept unchanged for UC-00 compatibility. The two functions coexist.
 
@@ -804,21 +809,25 @@ See §Resolved Protocol Questions for the source evidence.
 
 `validateProposal([])` returns a valid empty `ValidationOutcome` without throwing — Iroha 1
 has no source-level guard preventing an empty proposal from reaching the block creator
-(the stateful validator's loop runs zero iterations). In practice the Ordering Service
-would not create an empty proposal, so this is a degenerate case. The simulator handles
-it correctly: an empty block is committed with both `transactions` and `rejectedTransactionIds`
-empty.
+(the stateful validator's loop runs zero iterations). Call `validateProposal` directly to
+exercise this code path.
 
-**Distinction from all-rejected:** An empty proposal (no transactions submitted) is a different
-situation from a nonempty proposal where every transaction fails stateful validation. The
-simulator produces distinct narration for each case:
-- Empty proposal → step-7 narration: "No transactions were submitted…"; step-8: "no transactions were submitted"
-- All-rejected → step-7 narration: "All N transactions fail stateful validation…"; step-8: "all N transactions were rejected"
+`generateBlockFormationScenario([])` **throws** with a clear error. The Iroha 1 Ordering
+Service does not create empty proposals; a scenario with zero transactions has no meaningful
+pipeline to simulate. This guard prevents a misleading 11-step simulation lifecycle from
+being generated for a submission that never happened.
 
-The committed block structure is identical in both cases (empty `transactions`, empty
-`rejectedTransactionIds` for the empty proposal; empty `transactions`, nonempty
-`rejectedTransactionIds` for all-rejected). The narration difference ensures the
-distinction is visible during simulation playback.
+**Distinction from all-rejected:** A nonempty proposal where every transaction fails stateful
+validation (all-rejected) DOES produce a full 11-step scenario and a committed block with
+empty `transactions` and all IDs in `rejectedTransactionIds`. That is genuine protocol
+behavior — transactions were submitted, processed, rejected, and a block was still committed
+(confirmed: `Simulator::processVerifiedProposal` has no empty-proposal guard). The two cases
+are now handled differently:
+
+| Case | `validateProposal` | `generateBlockFormationScenario` |
+|------|--------------------|----------------------------------|
+| Empty (0 transactions) | Returns empty outcome | **Throws** |
+| All-rejected (N transactions, 0 valid) | Returns outcome with N rejectedTxIds | 11-step scenario; committed block with empty `transactions`, nonempty `rejectedTransactionIds` |
 
 ### Zero-value transfers
 
@@ -1270,21 +1279,21 @@ Given: config = { chainHeight: 0, createdTime: 0 }   (lower boundaries)
 Then:  does not throw
 ```
 
-#### UC-01-I-10: Empty proposal narration is distinct from all-rejected narration
+#### UC-01-I-10: Empty-submission throws; all-rejected produces full 11-step scenario
 
 ```
-Given: generateBlockFormationScenario([], emptyWorldState)
-When:  step-7 narration is inspected
-Then:  narration contains "No transactions were submitted"
+Given: generateBlockFormationScenario([], anyWorldState)
+When:  called
+Then:  throws with message "requires at least one transaction"
+       (Ordering Service does not create empty proposals; nothing to simulate)
 
 Given: generateBlockFormationScenario(allRejectTxs, worldState)
-When:  step-7 narration is inspected
-Then:  narration contains "fail stateful validation"
-
-Given: generateBlockFormationScenario([], emptyWorldState)
-When:  step-8 (verified-proposal) narration is inspected
-Then:  narration contains "no transactions were submitted"
-Then:  narration does not contain "rejected"
+       where every transaction fails stateful validation
+When:  called
+Then:  returns a full 11-step scenario (category 'other')
+Then:  committed block has empty transactions[] and nonempty rejectedTransactionIds[]
+Then:  step-7 narration contains "fail stateful validation"
+Then:  step-8 narration contains "were rejected"
 ```
 
 #### UC-01-I-11: selectAppliedTxStateChanges does not duplicate on RESET + replay
@@ -1298,13 +1307,24 @@ Then:  changes1.length === changes2.length  (no extra accumulation)
 Then:  for each i, changes1[i] === changes2[i]  (same object references — no re-creation)
 ```
 
-#### UC-01-E-13: applyTransactions guard rejects unvalidated transactions
+#### UC-01-E-13: applyTransactions per-transaction guard rejects unvalidated transactions
 
 ```
 Given: initialBalances = { alice: 10n }
 When:  applyTransactions({ alice: 10n }, [tx('tx1', alice→bob, '50')], { USD: 0 })
        (amount 50 > balance 10 — would only be passed if caller skipped validateProposal)
 Then:  throws with message indicating "negative balance"
+
+Regression — intermediate debit masked by later credit:
+Given: initialBalances = { alice: 10n, bob: 100n }
+When:  applyTransactions(
+         { alice: 10n, bob: 100n },
+         [tx('tx1', alice→bob, '50'),   // alice goes to -40n — INVALID
+          tx('tx2', bob→alice, '100')], // would restore alice to 60n — masked by postcondition
+         { USD: 0 }
+       )
+Then:  throws on tx1 — per-transaction check fires before tx2 is processed
+       (a postcondition-only check would miss this: final alice = 60n, final bob = 50n, both ≥ 0)
 
 Given: initialBalances = { alice: 100n }
 When:  applyTransactions({ alice: 100n }, [tx('tx1', alice→bob, '30')], { USD: 0 })

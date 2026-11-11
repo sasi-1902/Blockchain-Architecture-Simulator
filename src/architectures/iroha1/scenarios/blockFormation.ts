@@ -31,12 +31,6 @@ function buildValidationNarration(
   const v = outcome.validTxIds.length
   const r = outcome.rejectedTxIds.length
 
-  // Empty proposal: no transactions were submitted — distinct from all-rejected.
-  // In Iroha 1 the Ordering Service would not create an empty proposal in production;
-  // this is a simulator-only degenerate case (no timeout fires with zero queued transactions).
-  if (txCount === 0) {
-    return 'No transactions were submitted. Stateful validation has nothing to process.'
-  }
   if (r === 0) {
     return `All ${txCount} ${plural(txCount, 'transaction')} pass stateful validation against the World State View.`
   }
@@ -105,6 +99,20 @@ export function generateBlockFormationScenario(
         `ScenarioConfig.createdTime must be a non-negative integer — got ${config.createdTime}`,
       )
     }
+  }
+
+  // Precondition: at least one transaction must be submitted.
+  // The Iroha 1 Ordering Service does not create empty proposals; a scenario with zero
+  // transactions has no meaningful pipeline to simulate. This case is distinct from a
+  // nonempty proposal where every transaction fails stateful validation (all-rejected),
+  // which DOES produce a full 11-step pipeline and a committed block.
+  // To test validateProposal in isolation with an empty list, call it directly.
+  if (transactions.length === 0) {
+    throw new Error(
+      'generateBlockFormationScenario requires at least one transaction — ' +
+        'the Iroha 1 Ordering Service does not create empty proposals. ' +
+        'Use validateProposal([]) directly if you need to exercise the empty-proposal code path.',
+    )
   }
 
   // Single call to the execution engine — never recalculated during playback.
@@ -219,9 +227,7 @@ export function generateBlockFormationScenario(
         id: 'step-8-verified-proposal',
         componentId: 'verified-proposal',
         narration:
-          txCount === 0
-            ? 'Verified Proposal is empty — no transactions were submitted. An empty block will be committed per Iroha v1.4.0 behavior.'
-            : validCount === 0
+          validCount === 0
             ? `Verified Proposal is empty — all ${txCount} ${plural(txCount, 'transaction')} were rejected. An empty block will still be committed per Iroha v1.4.0 behavior.`
             : `Verified Proposal contains ${validCount} ${plural(validCount, 'transaction')}.`,
         txStateChanges: {
