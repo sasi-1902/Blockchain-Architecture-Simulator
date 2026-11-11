@@ -12,6 +12,12 @@ export interface BlockCreationTransaction {
 export interface CommittedBlock {
   number: number
   transaction: BlockCreationTransaction
+  /**
+   * Multi-transaction committed block (UC-01 and later). When present, overrides
+   * the single `transaction` for display purposes; `transaction` is kept for
+   * backward compatibility with UC-00.
+   */
+  transactions?: readonly BlockCreationTransaction[]
   /** "Genesis" for Block #1, otherwise the previous block's label. */
   previousLabel: string
   /** This block's World State View deltas, captured at the moment it committed. */
@@ -24,6 +30,11 @@ interface BlockCreationPanelProps {
   /** The current (not-yet-committed, or just-committed) transaction run's stage. */
   activeStage: BlockStage
   activeTransaction: BlockCreationTransaction
+  /**
+   * Multi-transaction list for UC-01 proposals and candidates. When provided,
+   * overrides the single `activeTransaction` in the proposal/candidate display.
+   */
+  activeTransactions?: readonly BlockCreationTransaction[]
   /** Cumulative demonstration balances (starting balances plus every committed run's deltas), by entity. */
   worldStateBalances: Record<string, number>
   /** The scenario's single asset, used to label each entity's cumulative balance (e.g. "USD balance"). */
@@ -65,13 +76,16 @@ function Connector({ solid }: { solid: boolean }) {
 }
 
 function CommittedBlockCard({ block }: { block: CommittedBlock }) {
+  const txList = block.transactions ?? [block.transaction]
   return (
     <div
       data-testid="committed-block"
       className="panel-flat flex min-w-[180px] shrink-0 flex-col items-start gap-1.5 bg-green-soft px-4 py-3"
     >
       <span className="label-mono">Block #{block.number}</span>
-      <TxLine transaction={block.transaction} />
+      {txList.map((tx, i) => (
+        <TxLine key={i} transaction={tx} />
+      ))}
       <span className="label-mono" style={{ color: 'var(--color-green-accent)' }}>
         Committed
       </span>
@@ -94,6 +108,7 @@ export function BlockCreationPanel({
   committedBlocks,
   activeStage,
   activeTransaction,
+  activeTransactions,
   worldStateBalances,
   assetLabel,
 }: BlockCreationPanelProps) {
@@ -124,7 +139,9 @@ export function BlockCreationPanel({
             {showsActiveProposal && (
               <div className="flex min-w-[180px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-muted px-4 py-3 text-center">
                 <span className="label-mono">Proposal</span>
-                <TxLine transaction={activeTransaction} />
+                {activeTransactions
+                  ? activeTransactions.map((tx, i) => <TxLine key={i} transaction={tx} />)
+                  : <TxLine transaction={activeTransaction} />}
                 <span className="label-mono">{activeStage === 'validated' ? 'Validated ✓' : 'Validating…'}</span>
               </div>
             )}
@@ -135,7 +152,9 @@ export function BlockCreationPanel({
                 className="panel-flat flex min-w-[180px] shrink-0 flex-col items-start gap-1.5 bg-yellow-soft px-4 py-3"
               >
                 <span className="label-mono">Candidate block #{committedBlocks.length + 1}</span>
-                <TxLine transaction={activeTransaction} />
+                {activeTransactions
+                  ? activeTransactions.map((tx, i) => <TxLine key={i} transaction={tx} />)
+                  : <TxLine transaction={activeTransaction} />}
                 <span className="label-mono text-muted-copy">
                   {activeStage === 'consensus' ? 'YAC consensus: agreed' : 'Awaiting consensus'}
                 </span>

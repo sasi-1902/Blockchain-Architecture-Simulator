@@ -69,6 +69,14 @@ const scenarioStepSchema = z.object({
   branchLabel: z.string().optional(),
 })
 
+const scenarioTransactionSchema = z.object({
+  id: nonEmptyString,
+  from: nonEmptyString,
+  to: nonEmptyString,
+  asset: nonEmptyString,
+  amount: nonEmptyString,
+})
+
 const scenarioSchema = z.object({
   id: nonEmptyString,
   name: nonEmptyString,
@@ -82,6 +90,7 @@ const scenarioSchema = z.object({
       amount: z.number(),
     })
     .catchall(z.unknown()),
+  transactions: z.array(scenarioTransactionSchema).optional(),
   steps: z.array(scenarioStepSchema),
 })
 

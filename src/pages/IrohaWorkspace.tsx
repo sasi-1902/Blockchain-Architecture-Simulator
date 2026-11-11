@@ -3,6 +3,7 @@ import { ArchitectureDiagram, type PhaseLabel } from '../components/diagram/Arch
 import { BlockCreationPanel, type BlockStage, type CommittedBlock } from '../components/diagram/BlockCreationPanel'
 import { ComponentDrawer } from '../components/drawer/ComponentDrawer'
 import { InteractionPanel } from '../components/simulation/InteractionPanel'
+import { UC01InteractionPanel } from '../components/simulation/UC01InteractionPanel'
 import {
   selectAppliedTxStateChanges,
   selectCurrentStep,
@@ -10,7 +11,7 @@ import {
   selectNarrationHistory,
 } from '../engine/simulationMachine'
 import { flattenTxStateChange } from '../engine/txStateChange'
-import type { BlockchainArchitecture, ComponentId } from '../engine/types'
+import type { BlockchainArchitecture, ComponentId, Scenario } from '../engine/types'
 import { computeCumulativeBalances } from '../engine/worldState'
 import { useAppStore } from '../state/appStore'
 import { useSimulationActor } from '../state/useSimulationActor'
@@ -56,16 +57,22 @@ const TRANSACTION_STATUS_BY_COMPONENT: Partial<Record<ComponentId, string>> = {
   'blockstore-wsv': 'Committed',
 }
 
-export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
-  const selectedComponentId = useAppStore((state) => state.selectedComponentId)
+// ---------------------------------------------------------------------------
+// ScenarioRunner — keyed by scenario.id so the XState actor remounts
+// on scenario switch, resetting stepIndex without stale scenario context.
+// ---------------------------------------------------------------------------
+
+interface ScenarioRunnerProps {
+  architecture: BlockchainArchitecture
+  scenario: Scenario
+}
+
+function ScenarioRunner({ architecture, scenario }: ScenarioRunnerProps) {
   const isSimulationOpen = useAppStore((state) => state.isSimulationOpen)
-  const goToLanding = useAppStore((state) => state.goToLanding)
-  const selectComponent = useAppStore((state) => state.selectComponent)
-  const closeComponentDetail = useAppStore((state) => state.closeComponentDetail)
   const startSimulation = useAppStore((state) => state.startSimulation)
   const closeSimulation = useAppStore((state) => state.closeSimulation)
+  const selectComponent = useAppStore((state) => state.selectComponent)
 
-  const scenario = architecture.scenarios[0]
   const { snapshot, send } = useSimulationActor(scenario)
   const { context } = snapshot
 
@@ -74,32 +81,59 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
   const isComplete = selectIsComplete(context)
   const isPlaying = snapshot.matches('playing')
   const isAtStart = context.stepIndex === -1
-  const stateChanges = selectAppliedTxStateChanges(context).flatMap((change) => flattenTxStateChange(change))
+
+  const rawStateChanges = selectAppliedTxStateChanges(context)
+  const stateChanges = rawStateChanges.flatMap((change) => flattenTxStateChange(change))
+  const accumulatedChanges = useMemo(
+    () => Object.assign({}, ...rawStateChanges) as Record<string, unknown>,
+    // rawStateChanges is a new array each render; stepIndex is the actual dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [context.stepIndex],
+  )
 
   const activeComponentId = isSimulationOpen ? (currentStep?.componentId ?? null) : null
 
-  // Committed-block history: appended once per successful transaction run,
-  // and intentionally kept outside the scenario's own XState machine (which
-  // continues to represent exactly one transaction run at a time) so that
-  // "Make another transaction" can reset the active run without losing the
-  // demonstration's accumulated chain.
   const [committedBlocks, setCommittedBlocks] = useState<CommittedBlock[]>([])
   const hasRecordedRunRef = useRef(false)
 
   useLayoutEffect(() => {
     if (isSimulationOpen && isComplete && !hasRecordedRunRef.current) {
       hasRecordedRunRef.current = true
-      setCommittedBlocks((previousBlocks) => [
-        ...previousBlocks,
-        {
-          number: previousBlocks.length + 1,
-          transaction: scenario.initialTx,
-          previousLabel: previousBlocks.length === 0 ? 'Genesis' : `Block #${previousBlocks.length}`,
-          worldStateChanges: stateChanges,
-        },
-      ])
+
+      if (scenario.transactions) {
+        // UC-01: build a multi-transaction committed block from the accumulated changes.
+        const blockData = accumulatedChanges.committedBlock as
+          | { transactions: Array<{ from: string; to: string; asset: string; amount: string }>; rejectedTransactionIds: string[] }
+          | undefined
+
+        setCommittedBlocks((prev) => [
+          ...prev,
+          {
+            number: prev.length + 1,
+            transaction: scenario.initialTx,
+            transactions: blockData?.transactions?.map((tx) => ({
+              from: tx.from,
+              to: tx.to,
+              asset: tx.asset,
+              amount: Number(tx.amount),
+            })),
+            previousLabel: prev.length === 0 ? 'Genesis' : `Block #${prev.length}`,
+            worldStateChanges: stateChanges,
+          },
+        ])
+      } else {
+        setCommittedBlocks((prev) => [
+          ...prev,
+          {
+            number: prev.length + 1,
+            transaction: scenario.initialTx,
+            previousLabel: prev.length === 0 ? 'Genesis' : `Block #${prev.length}`,
+            worldStateChanges: stateChanges,
+          },
+        ])
+      }
     }
-  }, [isSimulationOpen, isComplete, scenario.initialTx, stateChanges])
+  }, [isSimulationOpen, isComplete, scenario.initialTx, scenario.transactions, accumulatedChanges, stateChanges])
 
   const handleSend = useCallback(() => {
     hasRecordedRunRef.current = false
@@ -112,58 +146,96 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
     closeSimulation()
   }, [send, closeSimulation])
 
-  // `initialTx` is an intentionally architecture-agnostic catch-all record
-  // (DESIGN.md §7), so this scenario's authored starting World State View
-  // balances are read out with a narrow, local cast rather than widening the
-  // generic `Scenario` type for one architecture's demonstration data.
+  const handleResetUC01 = useCallback(() => {
+    hasRecordedRunRef.current = false
+    send({ type: 'RESET' })
+    closeSimulation()
+  }, [send, closeSimulation])
+
   const initialBalances = useMemo(
     () => (scenario.initialTx.balances as Record<string, number> | undefined) ?? {},
     [scenario.initialTx],
   )
 
-  // Cumulative demonstration balances: derived, not stored -- the starting
-  // balances plus every committed block's own captured deltas, in order.
-  // During an in-progress run this is exactly the "before this transaction"
-  // balance (the active run hasn't been appended to `committedBlocks` yet),
-  // which is what the Stateful Validation check below needs to display.
+  // For UC-01: use final balances from the committed block when available, else initial.
+  const uc01WorldStateBalances = useMemo(() => {
+    if (!scenario.transactions) return {}
+    const blockData = accumulatedChanges.committedBlock as
+      | { finalWorldState?: { balances: Record<string, string> } }
+      | undefined
+    // Fall back through validationOutcome if no committedBlock yet.
+    const validationData = accumulatedChanges.validationOutcome as
+      | { finalWorldState?: { balances: Record<string, string> } }
+      | undefined
+    const balancesStr =
+      blockData?.finalWorldState?.balances ?? validationData?.finalWorldState?.balances
+    if (balancesStr) {
+      return Object.fromEntries(Object.entries(balancesStr).map(([k, v]) => [k, Number(v)]))
+    }
+    return initialBalances
+  }, [scenario.transactions, accumulatedChanges, initialBalances])
+
   const currentBalances = useMemo(
-    () => computeCumulativeBalances(initialBalances, committedBlocks.map((block) => block.worldStateChanges)),
-    [initialBalances, committedBlocks],
+    () =>
+      scenario.transactions
+        ? uc01WorldStateBalances
+        : computeCumulativeBalances(initialBalances, committedBlocks.map((b) => b.worldStateChanges)),
+    [scenario.transactions, uc01WorldStateBalances, initialBalances, committedBlocks],
   )
 
   const transactionStatus =
     isSimulationOpen && currentStep ? (TRANSACTION_STATUS_BY_COMPONENT[currentStep.componentId] ?? 'Ready') : 'Ready'
   const showStatefulValidationCheck = isSimulationOpen && currentStep?.componentId === 'stateful-validation'
 
-  const componentsById = useMemo(
-    () => new Map(architecture.components.map((component) => [component.id, component])),
-    [architecture],
-  )
-  const selectedComponent = selectedComponentId ? componentsById.get(selectedComponentId) : undefined
-  const relatedConcepts = selectedComponent
-    ? architecture.concepts.filter((concept) => selectedComponent.relatedConcepts.includes(concept.id))
-    : []
-
   const blockStage: BlockStage =
     isSimulationOpen && currentStep ? (BLOCK_STAGE_BY_COMPONENT[currentStep.componentId] ?? 'waiting') : 'waiting'
 
-  const handleSelectComponent = useCallback((componentId: ComponentId) => selectComponent(componentId), [selectComponent])
+  // For UC-01's BlockCreationPanel: derive active transactions from the proposal/candidate data.
+  const uc01ActiveTransactions = useMemo(() => {
+    if (!scenario.transactions) return undefined
+    const blockData = accumulatedChanges.candidateBlock as
+      | { transactions: Array<{ from: string; to: string; asset: string; amount: string }> }
+      | undefined
+    const proposalData = accumulatedChanges.proposal as
+      | { transactions: Array<{ from: string; to: string; asset: string; amount: string }> }
+      | undefined
+    // Use committed txs for candidate/commit stages, all txs for proposal/validation stages.
+    const source = blockData ?? proposalData
+    return source?.transactions?.map((tx) => ({
+      from: tx.from,
+      to: tx.to,
+      asset: tx.asset,
+      amount: Number(tx.amount),
+    }))
+  }, [scenario.transactions, accumulatedChanges])
+
+  const handleSelectComponent = useCallback(
+    (componentId: ComponentId) => selectComponent(componentId),
+    [selectComponent],
+  )
+
+  const isUC01 = scenario.transactions !== undefined
 
   return (
-    <main className="flex min-h-screen flex-col gap-4 bg-background p-4 sm:p-6 lg:h-screen lg:overflow-hidden">
-      <div className="flex items-center justify-between gap-4">
-        <button type="button" onClick={goToLanding} className="btn-outline">
-          &larr; Back to blockchain selection
-        </button>
-        <div className="text-right">
-          <p className="label-mono">{architecture.displayName}</p>
-        </div>
-      </div>
-
-      <h1 className="heading-serif text-2xl font-semibold">{architecture.displayName}</h1>
-
-      <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,35%)_minmax(0,1fr)]">
-        <div className="lg:min-h-0">
+    <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,35%)_minmax(0,1fr)]">
+      <div className="lg:min-h-0">
+        {isUC01 ? (
+          <UC01InteractionPanel
+            transactions={scenario.transactions}
+            scenarioName={scenario.name}
+            isSimulationOpen={isSimulationOpen}
+            onStart={handleSend}
+            onReset={handleResetUC01}
+            send={send}
+            currentStep={currentStep}
+            currentStepIndex={context.stepIndex}
+            narrationHistory={narrationHistory}
+            accumulatedChanges={accumulatedChanges}
+            isComplete={isComplete}
+            isPlaying={isPlaying}
+            isAtStart={isAtStart}
+          />
+        ) : (
           <InteractionPanel
             scenario={scenario}
             isSimulationOpen={isSimulationOpen}
@@ -181,33 +253,95 @@ export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
             showStatefulValidationCheck={showStatefulValidationCheck}
             currentFromBalance={currentBalances[scenario.initialTx.from] ?? 0}
           />
-        </div>
+        )}
+      </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto]">
-          <div className="min-h-[420px] lg:min-h-0">
-            <p className="label-mono mb-1">Internal architecture</p>
-            <div className="h-[calc(100%-1.25rem)]">
-              <ArchitectureDiagram
-                components={architecture.components}
-                connections={architecture.connections}
-                onSelectComponent={handleSelectComponent}
-                currentComponentId={activeComponentId}
-                phaseLabels={PHASE_LABELS}
-              />
-            </div>
-          </div>
-
-          <div className="max-h-72 min-h-56">
-            <BlockCreationPanel
-              committedBlocks={committedBlocks}
-              activeStage={blockStage}
-              activeTransaction={scenario.initialTx}
-              worldStateBalances={currentBalances}
-              assetLabel={scenario.initialTx.asset}
+      <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto]">
+        <div className="min-h-[420px] lg:min-h-0">
+          <p className="label-mono mb-1">Internal architecture</p>
+          <div className="h-[calc(100%-1.25rem)]">
+            <ArchitectureDiagram
+              components={architecture.components}
+              connections={architecture.connections}
+              onSelectComponent={handleSelectComponent}
+              currentComponentId={activeComponentId}
+              phaseLabels={PHASE_LABELS}
             />
           </div>
         </div>
+
+        <div className="max-h-72 min-h-56">
+          <BlockCreationPanel
+            committedBlocks={committedBlocks}
+            activeStage={blockStage}
+            activeTransaction={scenario.initialTx}
+            activeTransactions={uc01ActiveTransactions}
+            worldStateBalances={currentBalances}
+            assetLabel={scenario.initialTx.asset}
+          />
+        </div>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// IrohaWorkspace — outer shell: header, scenario tabs, component drawer
+// ---------------------------------------------------------------------------
+
+export function IrohaWorkspace({ architecture }: IrohaWorkspaceProps) {
+  const goToLanding = useAppStore((state) => state.goToLanding)
+  const selectedComponentId = useAppStore((state) => state.selectedComponentId)
+  const closeComponentDetail = useAppStore((state) => state.closeComponentDetail)
+
+  const [selectedScenarioIndex, setSelectedScenarioIndex] = useState(0)
+  const scenario = architecture.scenarios[selectedScenarioIndex]
+
+  const componentsById = useMemo(
+    () => new Map(architecture.components.map((component) => [component.id, component])),
+    [architecture],
+  )
+  const selectedComponent = selectedComponentId ? componentsById.get(selectedComponentId) : undefined
+  const relatedConcepts = selectedComponent
+    ? architecture.concepts.filter((concept) => selectedComponent.relatedConcepts.includes(concept.id))
+    : []
+
+  return (
+    <main className="flex min-h-screen flex-col gap-4 bg-background p-4 sm:p-6 lg:h-screen lg:overflow-hidden">
+      <div className="flex items-center justify-between gap-4">
+        <button type="button" onClick={goToLanding} className="btn-outline">
+          &larr; Back to blockchain selection
+        </button>
+        <div className="text-right">
+          <p className="label-mono">{architecture.displayName}</p>
+        </div>
+      </div>
+
+      <h1 className="heading-serif text-2xl font-semibold">{architecture.displayName}</h1>
+
+      {architecture.scenarios.length > 1 && (
+        <div role="tablist" aria-label="Scenario" className="flex gap-2">
+          {architecture.scenarios.map((s, i) => (
+            <button
+              key={s.id}
+              role="tab"
+              aria-selected={i === selectedScenarioIndex}
+              type="button"
+              onClick={() => setSelectedScenarioIndex(i)}
+              className={
+                i === selectedScenarioIndex
+                  ? 'btn-accent text-sm'
+                  : 'btn-outline text-sm'
+              }
+            >
+              {i === 0 ? 'UC-00: Happy Path' : 'UC-01: Multi-Transaction'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* key forces ScenarioRunner to remount (and re-create the XState actor) on scenario switch */}
+      <ScenarioRunner key={scenario.id} architecture={architecture} scenario={scenario} />
 
       {selectedComponent && (
         <ComponentDrawer
