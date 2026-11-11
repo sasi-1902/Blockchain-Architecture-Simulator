@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { applyTransactions, validateProposal } from '../../src/engine/blockFormation'
+import {
+  applyTransactions,
+  formatScaledAmount,
+  serializeValidationOutcome,
+  validateProposal,
+} from '../../src/engine/blockFormation'
 import type { TransactionSpec, WorldState } from '../../src/engine/blockFormation'
 
 // ---------------------------------------------------------------------------
@@ -309,6 +314,34 @@ describe('UC-01-E-09c: excess decimal precision exceeds asset precision', () => 
   })
 })
 
+describe('UC-01-E-09e: "1." trailing-dot amount (Iroha v1.4.0 compatibility)', () => {
+  it('accepts "1." as precision=0, value=1 (matches Iroha 1 Amount class behavior)', () => {
+    // Iroha 1 Amount{"1."} has precision=0, value=1 (confirmed by amount_test.cpp).
+    // The previous AMOUNT_RE /^\d+(\.\d+)?$/ rejected "1." — now fixed to /^\d+(\.\d*)?$/.
+    const world: WorldState = {
+      balances: { alice: 5n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 0 },
+    }
+    const outcome = validateProposal([tx('tx1', 'alice', 'bob', '1.')], world)
+    expect(outcome.results[0].status).toBe('VALID')
+    expect(outcome.finalWorldState.balances).toMatchObject({ alice: 4n, bob: 1n })
+  })
+
+  it('"1." at precision=2 asset transfers 1.00 (scales correctly)', () => {
+    const world: WorldState = {
+      balances: { alice: 1000n }, // 10.00 USD at precision=2
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 2 },
+    }
+    const outcome = validateProposal([tx('tx1', 'alice', 'bob', '1.')], world)
+    // "1." has amountPrecision=0; asset precision=2; 0 <= 2 → passes precision check
+    // scaleAmount("1.", 2) = 1 * 100 + 0 = 100n (representing 1.00 USD)
+    expect(outcome.results[0].status).toBe('VALID')
+    expect(outcome.finalWorldState.balances).toMatchObject({ alice: 900n, bob: 100n })
+  })
+})
+
 describe('UC-01-E-09d: malformed amount string throws precondition error', () => {
   it('throws for a negative amount string', () => {
     const world: WorldState = {
@@ -364,6 +397,90 @@ describe('zero-amount transfer', () => {
     const outcome = validateProposal([tx('tx1', 'alice', 'bob', '0')], USD_P0)
     expect(outcome.results[0].status).toBe('VALID')
     expect(outcome.finalWorldState.balances).toMatchObject({ alice: 100n, bob: 20n })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// formatScaledAmount: precision-safe bigint → decimal string
+// ---------------------------------------------------------------------------
+
+describe('formatScaledAmount', () => {
+  it('precision=0: returns plain integer string', () => {
+    expect(formatScaledAmount(100n, 0)).toBe('100')
+    expect(formatScaledAmount(0n, 0)).toBe('0')
+  })
+
+  it('precision=2: formats correctly with leading zeros as needed', () => {
+    expect(formatScaledAmount(1050n, 2)).toBe('10.50')
+    expect(formatScaledAmount(100n, 2)).toBe('1.00')
+    expect(formatScaledAmount(5n, 2)).toBe('0.05')
+    expect(formatScaledAmount(0n, 2)).toBe('0.00')
+  })
+
+  it('precision=1: single decimal place', () => {
+    expect(formatScaledAmount(15n, 1)).toBe('1.5')
+    expect(formatScaledAmount(0n, 1)).toBe('0.0')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// serializeValidationOutcome: bigint → string, Set → array
+// ---------------------------------------------------------------------------
+
+describe('serializeValidationOutcome', () => {
+  it('converts bigint senderProvisionalBalance to formatted string', () => {
+    const world: WorldState = {
+      balances: { alice: 100n, bob: 20n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 0 },
+    }
+    const outcome = validateProposal([tx('tx1', 'alice', 'bob', '30')], world)
+    const serialized = serializeValidationOutcome(outcome, [tx('tx1', 'alice', 'bob', '30')], world.assets)
+
+    expect(serialized.results[0].senderProvisionalBalance).toBe('70')
+    expect(serialized.finalWorldState.balances['alice']).toBe('70')
+    expect(serialized.finalWorldState.balances['bob']).toBe('50')
+  })
+
+  it('converts bigint balances at precision=2 to decimal strings', () => {
+    const world: WorldState = {
+      balances: { alice: 1000n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 2 },
+    }
+    const transactions = [tx('tx1', 'alice', 'bob', '5')]
+    const outcome = validateProposal(transactions, world)
+    const serialized = serializeValidationOutcome(outcome, transactions, world.assets)
+
+    expect(serialized.results[0].senderProvisionalBalance).toBe('5.00')
+    expect(serialized.finalWorldState.balances['alice']).toBe('5.00')
+    expect(serialized.finalWorldState.balances['bob']).toBe('5.00')
+  })
+
+  it('accounts Set is converted to a sorted array', () => {
+    const world: WorldState = {
+      balances: { alice: 100n, bob: 20n },
+      accounts: new Set(['bob', 'alice']),
+      assets: { USD: 0 },
+    }
+    const transactions = [tx('tx1', 'alice', 'bob', '10')]
+    const outcome = validateProposal(transactions, world)
+    const serialized = serializeValidationOutcome(outcome, transactions, world.assets)
+
+    expect(serialized.finalWorldState.accounts).toEqual(['alice', 'bob'])
+  })
+
+  it('output is JSON.stringify-safe (no bigint values remain)', () => {
+    const world: WorldState = {
+      balances: { alice: 100n, bob: 20n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 0 },
+    }
+    const transactions = [tx('tx1', 'alice', 'bob', '30')]
+    const outcome = validateProposal(transactions, world)
+    const serialized = serializeValidationOutcome(outcome, transactions, world.assets)
+
+    expect(() => JSON.stringify(serialized)).not.toThrow()
   })
 })
 

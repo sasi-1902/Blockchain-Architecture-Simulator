@@ -1,5 +1,5 @@
 /**
- * UC-03: Multiple Transactions and Block Formation
+ * UC-01: Multiple Transactions and Block Formation
  *
  * Execution engine implementing Iroha v1.4.0 stateful validation semantics:
  * - Sequential per-transaction validation against a provisional WorldState View
@@ -92,8 +92,13 @@ export interface BlockContent {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Matches the valid amount format from Iroha 1's Amount class (amount.cpp). */
-const AMOUNT_RE = /^\d+(\.\d+)?$/
+/**
+ * Matches the valid amount format from Iroha 1's Amount class (amount.cpp).
+ * Accepts: "5", "10.50", "1." (trailing dot = precision 0, confirmed by amount_test.cpp).
+ * Rejects: ".5" (no leading digit), "-5", "", non-numeric.
+ * Note: the previous regex /^\d+(\.\d+)?$/ rejected "1." — this is the corrected form.
+ */
+const AMOUNT_RE = /^\d+(\.\d*)?$/
 
 function countDecimalPlaces(amountStr: string): number {
   const dotIndex = amountStr.indexOf('.')
@@ -118,7 +123,7 @@ function scaleAmount(amountStr: string, assetPrecision: number): bigint {
 // ---------------------------------------------------------------------------
 
 /**
- * Core UC-03 execution engine. Implements Iroha v1.4.0 stateful validation:
+ * Core UC-01 execution engine. Implements Iroha v1.4.0 stateful validation:
  * transactions are evaluated sequentially against a provisional WSV; each
  * passing transaction's balance delta is applied before the next is checked.
  *
@@ -230,4 +235,90 @@ export function applyTransactions(
   }
 
   return Object.fromEntries(balances)
+}
+
+// ---------------------------------------------------------------------------
+// Serialization utilities (precision-safe, JSON-compatible)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a bigint balance scaled to `precision` decimal places as a human-readable
+ * decimal string. Required because JSON.stringify throws on bigint.
+ *
+ * Examples (precision=2): 1050n → "10.50", 100n → "1.00", 0n → "0.00"
+ * Examples (precision=0): 100n → "100", 0n → "0"
+ */
+export function formatScaledAmount(scaled: bigint, precision: number): string {
+  if (precision === 0) return scaled.toString()
+  const str = scaled.toString().padStart(precision + 1, '0')
+  const intPart = str.slice(0, str.length - precision)
+  const fracPart = str.slice(str.length - precision)
+  return `${intPart}.${fracPart}`
+}
+
+/** JSON-serializable form of TransactionValidationResult (bigint → string). */
+export interface SerializedTransactionResult {
+  txId: string
+  status: 'VALID' | 'REJECTED'
+  reason?: RejectionReason
+  /** Sender's provisional balance formatted as a decimal string. */
+  senderProvisionalBalance: string
+}
+
+/** JSON-serializable form of ValidationOutcome (bigint → string, Set → sorted array). */
+export interface SerializedValidationOutcome {
+  results: readonly SerializedTransactionResult[]
+  validTxIds: readonly string[]
+  rejectedTxIds: readonly string[]
+  finalWorldState: {
+    balances: Readonly<Record<string, string>>
+    accounts: readonly string[]
+    assets: Readonly<Record<string, number>>
+  }
+}
+
+/**
+ * Convert a ValidationOutcome to a JSON-serializable form.
+ * bigint balances are formatted using per-transaction asset precision.
+ * The `accounts` Set is converted to a sorted array.
+ *
+ * The `transactions` list is used to look up each transaction's asset so that
+ * `senderProvisionalBalance` is formatted correctly per asset precision.
+ * `finalWorldState.balances` is formatted using the primary asset's precision
+ * (the asset from the first transaction).
+ */
+export function serializeValidationOutcome(
+  outcome: ValidationOutcome,
+  transactions: readonly TransactionSpec[],
+  assets: Readonly<Record<string, number>>,
+): SerializedValidationOutcome {
+  const txAssetMap = new Map(transactions.map((t) => [t.id, t.asset]))
+  const primaryAsset = transactions[0]?.asset ?? ''
+  const primaryPrecision = assets[primaryAsset] ?? 0
+
+  return {
+    results: outcome.results.map((r) => {
+      const assetId = txAssetMap.get(r.txId) ?? primaryAsset
+      const precision = assets[assetId] ?? 0
+      const serialized: SerializedTransactionResult = {
+        txId: r.txId,
+        status: r.status,
+        senderProvisionalBalance: formatScaledAmount(r.senderProvisionalBalance, precision),
+      }
+      if (r.reason !== undefined) serialized.reason = r.reason
+      return serialized
+    }),
+    validTxIds: outcome.validTxIds,
+    rejectedTxIds: outcome.rejectedTxIds,
+    finalWorldState: {
+      balances: Object.fromEntries(
+        Object.entries(outcome.finalWorldState.balances).map(([account, balance]) => [
+          account,
+          formatScaledAmount(balance, primaryPrecision),
+        ]),
+      ),
+      accounts: [...outcome.finalWorldState.accounts].sort(),
+      assets: outcome.finalWorldState.assets,
+    },
+  }
 }

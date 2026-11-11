@@ -10,9 +10,10 @@
  * Balance changes cannot be applied twice.
  */
 
-import { validateProposal } from '../../../engine/blockFormation'
+import { serializeValidationOutcome, validateProposal } from '../../../engine/blockFormation'
 import type {
   BlockContent,
+  SerializedValidationOutcome,
   TransactionSpec,
   ValidationOutcome,
   WorldState,
@@ -43,6 +44,28 @@ function buildValidationNarration(
 }
 
 /**
+ * Configuration for deterministic block content and simulation clock.
+ * All fields are optional; defaults produce a deterministic first-block scenario.
+ */
+export interface ScenarioConfig {
+  /**
+   * Current chain height before this block is added.
+   * The new block's height is chainHeight + 1. Default: 0 (block height 1).
+   */
+  chainHeight?: number
+  /**
+   * Hash of the last committed block (used as prevBlockHash).
+   * Default: 'genesis' (first block in the chain).
+   */
+  prevBlockHash?: string
+  /**
+   * Simulation clock value for block.createdTime.
+   * Pass the result of a simulation clock's now() for determinism. Default: 0.
+   */
+  createdTime?: number
+}
+
+/**
  * Generate a Scenario for UC-01 block formation from a list of transaction
  * specs and an initial WorldState.
  *
@@ -52,26 +75,45 @@ function buildValidationNarration(
  * The generated scenario's 11 steps mirror the Iroha v1 transaction pipeline
  * in the same order as the UC-00 happy-path scenario so that the existing
  * XState machine and pipeline diagram work without changes.
+ *
+ * @param config - Optional chain state and simulation clock overrides for
+ *   deterministic block height and timestamps. Defaults produce height=1,
+ *   prevBlockHash='genesis', createdTime=0.
  */
 export function generateBlockFormationScenario(
   transactions: readonly TransactionSpec[],
   worldState: WorldState,
+  config?: ScenarioConfig,
 ): Scenario {
   // Single call to the execution engine — never recalculated during playback.
   const outcome: ValidationOutcome = validateProposal(transactions, worldState)
 
+  // Serialized form for txStateChanges: bigint → string, Set → sorted array.
+  // Raw bigints cannot be safely embedded in JSON-serializable step data.
+  const serializedOutcome: SerializedValidationOutcome = serializeValidationOutcome(
+    outcome,
+    transactions,
+    worldState.assets,
+  )
+
   const validTxSet = new Set(outcome.validTxIds)
   const validTransactions = transactions.filter((tx) => validTxSet.has(tx.id))
 
-  // BlockContent is built once and shared between the candidate and commit steps.
-  // Using createdTime: 0 keeps the scenario deterministic for the same inputs.
-  const blockContent: BlockContent = {
-    height: 1,
-    prevBlockHash: 'genesis',
-    createdTime: 0,
+  const blockHeight = (config?.chainHeight ?? 0) + 1
+  const prevBlockHash = config?.prevBlockHash ?? 'genesis'
+  const createdTime = config?.createdTime ?? 0
+
+  // Candidate and committed blocks are distinct objects even though their data
+  // is identical at construction time. This allows inspectors to unambiguously
+  // identify the pipeline stage: candidateBlock = pre-consensus, committedBlock = finalized.
+  const candidateBlock: BlockContent = {
+    height: blockHeight,
+    prevBlockHash,
+    createdTime,
     transactions: validTransactions,
     rejectedTransactionHashes: outcome.rejectedTxIds,
   }
+  const committedBlock: BlockContent = { ...candidateBlock }
 
   const txCount = transactions.length
   const validCount = outcome.validTxIds.length
@@ -132,14 +174,14 @@ export function generateBlockFormationScenario(
         },
       },
       {
-        // Stateful validation: sequential per-transaction validation against the
-        // provisional WSV. The ValidationOutcome is pre-computed and embedded here;
-        // it is never recalculated during playback.
+        // Stateful validation: sequential per-transaction validation against the provisional WSV.
+        // serializedOutcome is JSON-safe (bigint → string, Set → sorted array).
+        // The raw ValidationOutcome with bigints is computed once here and never recalculated.
         id: 'step-7-stateful-validation',
         componentId: 'stateful-validation',
         narration: buildValidationNarration(outcome, txCount),
         txStateChanges: {
-          validationOutcome: outcome,
+          validationOutcome: serializedOutcome,
         },
       },
       {
@@ -159,7 +201,7 @@ export function generateBlockFormationScenario(
       },
       {
         // Candidate block: the block is created from the verified proposal.
-        // This is a candidate — consensus has not yet been reached.
+        // This is a CANDIDATE — consensus has not yet been reached.
         // Source: Simulator::processVerifiedProposal in simulator.cpp
         id: 'step-9-block-creator',
         componentId: 'block-creator',
@@ -167,18 +209,27 @@ export function generateBlockFormationScenario(
           `Candidate block created with ${validCount} committed ${plural(validCount, 'transaction')} ` +
           `and ${rejectedCount} rejected ${plural(rejectedCount, 'hash', 'hashes')}.`,
         txStateChanges: {
-          candidateBlock: blockContent,
+          candidateBlock,
         },
       },
       {
-        // Consensus: peers vote on the candidate block.
+        // Consensus: peers vote on the candidate block via YAC protocol.
+        // consensusOutcome is a distinct event — it must not be confused with block creation
+        // (step 9) or commitment (step 11).
         id: 'step-10-yac-consensus',
         componentId: 'yac-consensus',
         narration: `Peers reach consensus on the candidate block via YAC.`,
+        txStateChanges: {
+          consensusOutcome: {
+            result: 'agreed',
+            blockHeight,
+          },
+        },
       },
       {
-        // Commit: the block is committed and the World State View is updated.
-        // The committed block is the same as the candidate block post-consensus.
+        // Commit: the block is finalized and the World State View is updated.
+        // committedBlock is a distinct object from candidateBlock (different reference,
+        // same payload) — inspectors can distinguish pre- and post-consensus state.
         // The all-rejected case still produces a committed block (confirmed:
         // simulator.cpp:processVerifiedProposal has no empty-proposal guard).
         id: 'step-11-commit',
@@ -189,7 +240,7 @@ export function generateBlockFormationScenario(
             ? ` ${rejectedCount} transaction ${plural(rejectedCount, 'hash', 'hashes')} recorded as rejected.`
             : ''),
         txStateChanges: {
-          block: blockContent,
+          committedBlock,
         },
       },
     ],
