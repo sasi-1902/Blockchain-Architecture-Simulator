@@ -235,6 +235,22 @@ error in the scenario definition. The execution engine guards against this befor
 loop — these are thrown precondition errors, not `RejectionReason` values, because Iroha 1
 rejects them at stateless validation before they reach the stateful validator.
 
+**Additional preconditions (thrown before validation loop):**
+
+- **Duplicate transaction IDs:** All transaction IDs in a proposal must be unique.
+  Duplicate IDs corrupt `validTxIds` / `rejectedTransactionIds` with repeated entries and make
+  it impossible to identify which transaction a result refers to.
+
+- **Multi-asset proposals not supported:** All transactions in a proposal must use the same
+  asset. `WorldState.balances` is keyed by account name without asset information — a
+  multi-asset proposal would check one asset's balance against a different asset's transfer
+  amount, producing incorrect accept/reject decisions. Multi-asset is a known limitation;
+  UC-01 models single-asset scenarios only.
+
+**Asset precision:** The simulator does not validate that `WorldState.assets` values are
+integers in the Iroha 1 uint8 range (0–255). The behavior for non-integer or out-of-range
+precision values is undefined. Callers are responsible for supplying valid precisions.
+
 ### `RejectionReason`
 
 ```ts
@@ -298,16 +314,20 @@ export interface BlockContent {
    *  Maps to `Block_v1.Payload.transactions` in block.proto. */
   transactions: readonly TransactionSpec[]
   /**
-   * Symbolic identifiers for the REJECTED transactions.
-   * In Iroha 1 these are the actual transaction hashes stored in
-   * `Block_v1.Payload.rejected_transactions_hashes` (field 6, type `repeated string`).
+   * Symbolic identifiers of REJECTED transactions.
+   *
+   * In Iroha 1 these are **cryptographic hashes** stored in
+   * `Block_v1.Payload.rejected_transactions_hashes` (block.proto field 6).
    * Purpose (per proto comment): "to be able to guarantee the client that this
    * transaction was not and will never be executed."
-   * In the simulation, the transaction's `id` stands in for the cryptographic hash.
-   * This field is non-empty when any transactions were rejected, and IS present
-   * in a block even when `transactions` is empty (all-rejected case).
+   *
+   * In this simulator the transaction's symbolic `id` stands in for the hash —
+   * cryptographic hash computation is out of scope. The field is named
+   * `rejectedTransactionIds` (not "Hashes") to make this distinction explicit.
+   * Non-empty when rejections occurred; empty (but present) when all passed.
+   * The all-rejected case produces an empty `transactions` list with all IDs here.
    */
-  rejectedTransactionHashes: readonly string[]
+  rejectedTransactionIds: readonly string[]
 }
 ```
 
@@ -378,9 +398,17 @@ txStateChanges: {
 YAC Consensus step (step-10) — **distinct consensus event**:
 ```ts
 txStateChanges: {
-  consensusOutcome: { result: 'agreed', blockHeight: number }
+  consensusOutcome: {
+    result: 'agreed',   // hardcoded — YAC algorithm is NOT simulated
+    blockHeight: number,
+    assumed: true,      // explicit flag: consensus success is an assumption, not computed
+  }
 }
 ```
+**YAC assumption:** The YAC consensus algorithm is not simulated. `result: 'agreed'` is always
+hardcoded and `assumed: true` marks this explicitly. The simulation documents consensus as a
+black box that always succeeds; it does not model Byzantine fault tolerance, quorum formation,
+or vote aggregation. Never present this event as a computed consensus outcome.
 
 Commit step (step-11) — **committed block, post-consensus**:
 ```ts
@@ -611,12 +639,14 @@ Events:
 
 ### Phase 6 — Consensus and commitment
 
-YAC consensus proceeds as a black box (identical to UC-00). The simulation advances directly to
-`COMMIT` once the candidate block exists.
+**YAC consensus is NOT simulated.** The simulation assumes consensus always succeeds. The
+`consensusOutcome.assumed: true` flag in step-10 marks this explicitly. The YAC algorithm,
+Byzantine fault tolerance, quorum formation, and vote aggregation are all out of scope for UC-01.
+The simulation advances directly to `COMMIT` once the candidate block exists.
 
 Events:
-- `CONSENSUS_REACHED(blockHeight)`
-- `BLOCK_COMMITTED(blockHeight, validTxIds[], rejectedTxHashes[])`
+- `CONSENSUS_REACHED(blockHeight)` — assumed, not computed
+- `BLOCK_COMMITTED(blockHeight, validTxIds[], rejectedTransactionIds[])`
 - `WSV_UPDATED(finalBalances)`
 
 **World State View update rule:** Only committed (VALID) transactions update account balances.
@@ -755,10 +785,45 @@ This is correct protocol behavior and must be represented accurately.
 ### Empty Verified Proposal
 
 Occurs when all transactions are rejected. Confirmed behavior: a block IS committed with
-zero committed transactions and all rejected transaction hashes. Balances are unchanged.
+zero committed transactions and all rejected transaction IDs. Balances are unchanged.
 See §Resolved Protocol Questions for the source evidence.
 
-### Duplicate transactions
+### Empty proposal (zero transactions)
+
+`validateProposal([])` returns a valid empty `ValidationOutcome` without throwing — Iroha 1
+has no source-level guard preventing an empty proposal from reaching the block creator
+(the stateful validator's loop runs zero iterations). In practice the Ordering Service
+would not create an empty proposal, so this is a degenerate case. The simulator handles
+it correctly: an empty block is committed with both `transactions` and `rejectedTransactionIds`
+empty.
+
+### Zero-value transfers
+
+`validateProposal` accepts amount `"0"`. Iroha 1 has no SQL check prohibiting zero-value
+transfers — `Amount{"0"}` is valid and passes the balance check (`balance >= 0` always).
+The balance is unchanged post-transfer. This behavior matches the current implementation
+but is not independently verified against a pinned Iroha 1.4.0 integration test.
+
+### Self-transfers (from === to)
+
+The simulator allows self-transfers (same sender and receiver). Iroha 1 has no SQL check
+prohibiting `sender == receiver`. The final balance is unchanged: the deduction and credit
+cancel out. `senderProvisionalBalance` in the result reflects the intermediate post-deduction
+value (before the credit is applied), not the final balance — this is a documented behavioral
+detail of the simulator, not a bug.
+
+### Duplicate transaction IDs
+
+A proposal with duplicate transaction IDs throws a precondition error. This is a programming
+error in the scenario definition, not a protocol-level rejection reason.
+
+### Multi-asset proposals
+
+A proposal where transactions use more than one asset throws a precondition error. The current
+single-asset balance model cannot correctly validate multi-asset proposals. This is a documented
+limitation of UC-01.
+
+### Duplicate transactions (same content, different IDs)
 
 Not modeled. The simulation documents duplicate detection as a known limitation.
 
@@ -793,7 +858,7 @@ crypto_signer_->sign(*block);
 ```
 
 **Implication for the simulation:** Scenario C commits a block with zero transactions and
-non-empty `rejectedTransactionHashes`. Balances are unchanged. Block height increments.
+non-empty `rejectedTransactionIds`. Balances are unchanged. Block height increments.
 
 ### Q2 — Sequential provisional WSV ✓ RESOLVED
 
@@ -957,7 +1022,7 @@ Then:  finalWorldState.balances = { alice: 5n }  (unchanged)
 
 When:  the XState machine advances to the commit step
 Then:  txStateChanges.committedBlock.transactions = []
-Then:  txStateChanges.committedBlock.rejectedTransactionHashes = ['tx1', 'tx2']
+Then:  txStateChanges.committedBlock.rejectedTransactionIds = ['tx1', 'tx2']
 ```
 
 **Source-code evidence (Iroha tag `1.4.0`):**
@@ -1057,6 +1122,27 @@ The same precondition applies to empty strings, strings starting with '.', strin
 non-digit characters, and other inputs that Amount parses as "NaN"
 (see `amount_test.cpp` test `AmountTest.Invalid`).
 
+#### UC-01-E-10: Duplicate transaction IDs throw a precondition error
+
+```
+Given: [ tx('tx1', alice→bob, "10"), tx('tx1', alice→carol, "5") ]  — same ID 'tx1'
+When:  validateProposal([tx1, tx1_dup], worldState)
+Then:  throws with message indicating "transaction IDs must be unique"
+  — duplicate IDs corrupt validTxIds / rejectedTransactionIds and prevent
+    reliable per-transaction result tracking
+```
+
+#### UC-01-E-11: Multi-asset proposals throw a precondition error
+
+```
+Given: WorldState { assets: { USD: 0, ETH: 2 } }
+Given: [ tx('tx1', alice→bob, "10", USD), tx('tx2', alice→carol, "5", ETH) ]
+When:  validateProposal([tx1, tx2], worldState)
+Then:  throws with message indicating "multi-asset proposals are not supported"
+  — WorldState.balances is keyed by account without asset information; using
+    one asset's balance to validate a different asset's transfer produces incorrect decisions
+```
+
 ### Integration tests — scenario machine with generated scenario
 
 #### UC-01-I-01: Generated scenario step count matches pipeline stages
@@ -1086,7 +1172,7 @@ Then:  JSON.stringify(txStateChanges.validationOutcome) does not throw
 Given: a generated scenario (Scenario B)
 When:  the XState machine advances to the commit step
 Then:  currentStep.txStateChanges.committedBlock.transactions contains only [ tx1, tx3 ]
-Then:  currentStep.txStateChanges.committedBlock.rejectedTransactionHashes contains [ tx2.id ]
+Then:  currentStep.txStateChanges.committedBlock.rejectedTransactionIds contains [ tx2.id ]
 ```
 
 #### UC-01-I-06: Candidate-block, consensus-outcome, and committed-block are distinct events
@@ -1380,7 +1466,7 @@ not yet begun — pending review approval.
 | Scenario integration tests (UC-01-I-01 through I-08) | `tests/engine/blockFormationScenario.test.ts` | ✓ 29 tests pass |
 | Multi-transaction `Scenario.transactions` field | `src/engine/types.ts` | ✓ Additive only |
 
-**Test baseline (current):** 139 tests pass across 13 test files. TypeScript build: clean.
+**Test baseline (current):** 146 tests pass across 13 test files. TypeScript build: clean.
 
 ### Pending review
 
@@ -1392,20 +1478,34 @@ before proceeding.
 
 | Item | Resolution |
 |------|-----------|
-| `"1."` regex mismatch | Fixed: regex updated from `/^\d+(\.\d+)?$/` to `/^\d+(\.\d*)?$/`; `"1."` is now accepted (precision=0, value=1), matching Iroha 1 `amount_test.cpp` |
+| `"1."` regex mismatch | Fixed: regex updated to `/^\d+(\.\d*)?$/`; `"1."` now accepted (precision=0, value=1), matching Iroha 1 `amount_test.cpp` |
 | `bigint` in txStateChanges (not JSON-safe) | Fixed: `serializeValidationOutcome` converts bigint→string, Set→sorted array before embedding in step data |
 | Placeholder block height/timestamp | Fixed: `ScenarioConfig` injection; defaults are deterministic (height=1, prevBlockHash='genesis', createdTime=0) |
-| Shared `blockContent` reference between candidate and commit steps | Fixed: separate `candidateBlock` and `committedBlock` objects; `consensusOutcome` added to step-10 |
+| Shared `blockContent` reference between candidate and commit steps | Fixed: separate `candidateBlock` and `committedBlock` objects; `consensusOutcome` with `assumed: true` added to step-10 |
+| `rejectedTransactionHashes` field naming | Fixed: renamed to `rejectedTransactionIds` to make explicit that the simulator stores symbolic IDs, not cryptographic hashes |
+| Duplicate transaction IDs silently corrupting results | Fixed: precondition throws when any two transactions share an ID |
+| Multi-asset proposals using wrong asset's balance | Fixed: precondition throws when transactions use more than one asset |
+| YAC consensus presented ambiguously | Fixed: `assumed: true` flag in `consensusOutcome`; narration states "assumed to succeed — YAC not simulated" |
 
-### Known educational simplifications
+### Known limitations and unverified behaviors
 
-- YAC consensus is a black box that always succeeds.
-- Block hashes and rejected transaction hashes are symbolic IDs, not cryptographic values.
-- Multi-peer Proposal distribution is not visualized.
-- `proposal_creation_timeout` is not modeled as a real timer.
-- Transaction deduplication is not modeled.
-- The batch is animated as a unit; individual per-transaction markers are not implemented.
-- Atomic and ordered `BatchType` semantics are explicitly out of scope.
-- `prevBlockHash` is a symbolic string, not computed from actual block content.
-- `createdTime` is injected via `ScenarioConfig` rather than from a live simulation clock;
-  the first-block default is 0 (deterministic) rather than a real epoch timestamp.
+- **Multi-asset balance model:** `WorldState.balances` is keyed by account name only. Supporting
+  multiple assets per account requires a compound key (e.g. `account:asset`). Multi-asset
+  proposals are rejected by a precondition guard. Future use cases may require this change.
+- **Asset precision validation:** The simulator does not validate that asset precision values
+  are integers in 0–255 (Iroha 1 uint8 range). Out-of-range values produce undefined behavior.
+- **Zero-value transfers:** Accepted by the current implementation. Not independently verified
+  against Iroha 1.4.0 integration tests.
+- **Self-transfers:** Allowed; final balance unchanged. `senderProvisionalBalance` shows
+  intermediate post-deduction value. Not independently verified against Iroha 1.4.0.
+- **Empty proposals:** Accepted; return an empty `ValidationOutcome`. Not independently
+  verified against Iroha 1.4.0 (Ordering Service would not normally create an empty proposal).
+- **YAC consensus:** Always assumed to succeed; not simulated.
+- **Block hashes:** Symbolic IDs, not cryptographic values.
+- **Multi-peer Proposal distribution:** Not visualized.
+- **`proposal_creation_timeout`:** Not modeled as a real timer.
+- **Transaction deduplication (same content):** Not modeled.
+- **Batch animation:** The batch is animated as a unit; per-transaction markers not implemented.
+- **`BatchType::ATOMIC` / `ORDERED`:** Explicitly out of scope.
+- **`prevBlockHash`:** Symbolic string, not computed from actual block content.
+- **`createdTime`:** Injected via `ScenarioConfig`; first-block default is 0.

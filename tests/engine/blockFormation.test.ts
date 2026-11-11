@@ -392,11 +392,111 @@ describe('UC-01-E-09d: malformed amount string throws precondition error', () =>
 // Additional edge cases
 // ---------------------------------------------------------------------------
 
+describe('empty proposal', () => {
+  it('returns an empty ValidationOutcome without throwing', () => {
+    // Iroha 1 handles empty proposals (no guard in stateful_validator_impl.cpp).
+    // The Ordering Service would not normally create an empty proposal in production,
+    // but the execution engine handles it correctly as a degenerate case.
+    const outcome = validateProposal([], USD_P0)
+    expect(outcome.results).toHaveLength(0)
+    expect(outcome.validTxIds).toEqual([])
+    expect(outcome.rejectedTxIds).toEqual([])
+    expect(outcome.finalWorldState.balances).toEqual(USD_P0.balances)
+  })
+})
+
 describe('zero-amount transfer', () => {
   it('passes validation when sender has sufficient balance', () => {
+    // Zero-value transfers are not prohibited by Iroha 1 Amount class or SQL checks.
+    // scaleAmount("0", 0) = 0n; 100n >= 0n passes; balance unchanged.
     const outcome = validateProposal([tx('tx1', 'alice', 'bob', '0')], USD_P0)
     expect(outcome.results[0].status).toBe('VALID')
     expect(outcome.finalWorldState.balances).toMatchObject({ alice: 100n, bob: 20n })
+  })
+})
+
+describe('self-transfer (from === to)', () => {
+  it('passes validation and leaves balance unchanged', () => {
+    // Iroha 1 has no SQL check preventing sender === receiver.
+    // The engine applies: newSenderBalance = balance - amount; then to receives amount.
+    // Since from === to, the final balance is (balance - amount) + amount = balance.
+    // senderProvisionalBalance reflects the intermediate post-deduction value.
+    const outcome = validateProposal([tx('tx1', 'alice', 'alice', '30')], USD_P0)
+    expect(outcome.results[0].status).toBe('VALID')
+    // Final balance is unchanged: alice sent to herself
+    expect(outcome.finalWorldState.balances['alice']).toBe(100n)
+    // senderProvisionalBalance shows the intermediate deduction (documented behavior)
+    expect(outcome.results[0].senderProvisionalBalance).toBe(70n)
+  })
+
+  it('is rejected when the self-transfer amount exceeds the balance', () => {
+    const outcome = validateProposal([tx('tx1', 'alice', 'alice', '200')], USD_P0)
+    expect(outcome.results[0].status).toBe('REJECTED')
+    expect(outcome.results[0].reason).toBe('INSUFFICIENT_BALANCE')
+    expect(outcome.finalWorldState.balances['alice']).toBe(100n)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UC-01-E-10: Duplicate transaction IDs throw a precondition error
+// ---------------------------------------------------------------------------
+
+describe('UC-01-E-10: duplicate transaction IDs within a proposal', () => {
+  it('throws when two transactions share the same ID', () => {
+    expect(() =>
+      validateProposal(
+        [tx('tx1', 'alice', 'bob', '10'), tx('tx1', 'alice', 'carol', '5')],
+        USD_P0,
+      ),
+    ).toThrow(/transaction IDs must be unique/)
+  })
+
+  it('allows proposals where all IDs are distinct', () => {
+    expect(() =>
+      validateProposal(
+        [tx('tx1', 'alice', 'bob', '10'), tx('tx2', 'alice', 'carol', '5')],
+        USD_P0,
+      ),
+    ).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UC-01-E-11: Multi-asset proposals throw a precondition error
+// ---------------------------------------------------------------------------
+
+describe('UC-01-E-11: multi-asset proposal rejected as unsupported', () => {
+  it('throws when transactions reference more than one asset', () => {
+    const world: WorldState = {
+      balances: { alice: 1000n, bob: 500n },
+      accounts: new Set(['alice', 'bob', 'carol']),
+      assets: { USD: 0, ETH: 2 },
+    }
+    // If allowed, alice's USD balance would be checked against an ETH transfer
+    // amount — producing incorrect accept/reject decisions.
+    expect(() =>
+      validateProposal(
+        [
+          tx('tx1', 'alice', 'bob', '10', 'USD'),
+          tx('tx2', 'alice', 'carol', '5', 'ETH'),
+        ],
+        world,
+      ),
+    ).toThrow(/multi-asset proposals are not supported/)
+  })
+
+  it('allows a proposal where all transactions use the same asset', () => {
+    const world: WorldState = {
+      balances: { alice: 1000n, bob: 500n },
+      accounts: new Set(['alice', 'bob', 'carol']),
+      assets: { USD: 0, ETH: 2 },
+    }
+    expect(() =>
+      validateProposal(
+        [tx('tx1', 'alice', 'bob', '10', 'USD'), tx('tx2', 'alice', 'carol', '5', 'USD')],
+        world,
+      ),
+    ).not.toThrow()
   })
 })
 

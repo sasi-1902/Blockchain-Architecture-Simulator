@@ -133,25 +133,25 @@ describe('UC-01-I-03: commit step carries committedBlock (BlockContent)', () => 
     const block = commitStep?.txStateChanges?.['committedBlock'] as BlockContent
 
     expect(block.transactions.map((t) => t.id)).toEqual(['tx1', 'tx2'])
-    expect(block.rejectedTransactionHashes).toEqual([])
+    expect(block.rejectedTransactionIds).toEqual([])
   })
 
-  it('partial: committedBlock.transactions has valid txs; rejectedHashes has rejected ids', () => {
+  it('partial: committedBlock.transactions has valid txs; rejectedTransactionIds has rejected ids', () => {
     const scenario = generateBlockFormationScenario(PARTIAL_TXS, WORLD)
     const commitStep = scenario.steps.find((s) => s.componentId === 'commit')
     const block = commitStep?.txStateChanges?.['committedBlock'] as BlockContent
 
     expect(block.transactions.map((t) => t.id)).toEqual(['tx1', 'tx3'])
-    expect(block.rejectedTransactionHashes).toEqual(['tx2'])
+    expect(block.rejectedTransactionIds).toEqual(['tx2'])
   })
 
-  it('all-rejected: committedBlock.transactions is empty; all ids are in rejectedHashes', () => {
+  it('all-rejected: committedBlock.transactions is empty; all ids are in rejectedTransactionIds', () => {
     const scenario = generateBlockFormationScenario(ALL_REJECT_TXS, WORLD)
     const commitStep = scenario.steps.find((s) => s.componentId === 'commit')
     const block = commitStep?.txStateChanges?.['committedBlock'] as BlockContent
 
     expect(block.transactions).toHaveLength(0)
-    expect(block.rejectedTransactionHashes).toEqual(['tx1', 'tx2'])
+    expect(block.rejectedTransactionIds).toEqual(['tx1', 'tx2'])
   })
 })
 
@@ -214,7 +214,7 @@ describe('UC-01-I-05: scenario generation is deterministic', () => {
     const block2 = s2.steps.find((s) => s.componentId === 'commit')?.txStateChanges?.['committedBlock'] as BlockContent
 
     expect(block1.transactions.map((t) => t.id)).toEqual(block2.transactions.map((t) => t.id))
-    expect(block1.rejectedTransactionHashes).toEqual(block2.rejectedTransactionHashes)
+    expect(block1.rejectedTransactionIds).toEqual(block2.rejectedTransactionIds)
   })
 })
 
@@ -244,11 +244,11 @@ describe('input sensitivity: changing transactions changes generated scenario', 
 
     // Order A: tx1 passes (alice→bob:40, provisional 10), tx2 rejected (10 < 20)
     expect(blockA.transactions.map((t) => t.id)).toEqual(['tx1'])
-    expect(blockA.rejectedTransactionHashes).toEqual(['tx2'])
+    expect(blockA.rejectedTransactionIds).toEqual(['tx2'])
 
     // Order B: tx2 passes (alice→carol:20, provisional 30), tx1 rejected (30 < 40)
     expect(blockB.transactions.map((t) => t.id)).toEqual(['tx2'])
-    expect(blockB.rejectedTransactionHashes).toEqual(['tx1'])
+    expect(blockB.rejectedTransactionIds).toEqual(['tx1'])
   })
 
   it('increasing alice balance makes previously rejected transaction pass', () => {
@@ -264,8 +264,8 @@ describe('input sensitivity: changing transactions changes generated scenario', 
     const blockOrig = withOriginal.steps.find((s) => s.componentId === 'commit')?.txStateChanges?.['committedBlock'] as BlockContent
     const blockRich = withMore.steps.find((s) => s.componentId === 'commit')?.txStateChanges?.['committedBlock'] as BlockContent
 
-    expect(blockOrig.rejectedTransactionHashes).toContain('tx2')
-    expect(blockRich.rejectedTransactionHashes).not.toContain('tx2')
+    expect(blockOrig.rejectedTransactionIds).toContain('tx2')
+    expect(blockRich.rejectedTransactionIds).not.toContain('tx2')
   })
 })
 
@@ -410,15 +410,17 @@ describe('UC-01-I-06: candidate-block, consensus-outcome, and committed-block ar
     )
   })
 
-  it('consensusOutcome.result is "agreed" and blockHeight matches block height', () => {
+  it('consensusOutcome.result is "agreed", assumed=true, and blockHeight matches block height', () => {
     const scenario = generateBlockFormationScenario(ALL_PASS_TXS, WORLD)
     const consensusStep = scenario.steps.find((s) => s.componentId === 'yac-consensus')
     const consensus = consensusStep?.txStateChanges?.['consensusOutcome'] as {
       result: string
       blockHeight: number
+      assumed: boolean
     }
 
     expect(consensus.result).toBe('agreed')
+    expect(consensus.assumed).toBe(true)   // YAC is not simulated — consensus is assumed
     expect(typeof consensus.blockHeight).toBe('number')
 
     const committedBlock = scenario.steps.find((s) => s.componentId === 'commit')

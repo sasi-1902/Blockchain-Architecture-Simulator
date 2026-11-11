@@ -80,12 +80,18 @@ export interface BlockContent {
   /** Committed (VALID) transactions. Maps to Block_v1.Payload.transactions. */
   transactions: readonly TransactionSpec[]
   /**
-   * REJECTED transaction identifiers. Maps to Block_v1.Payload.rejected_transactions_hashes.
-   * Present and non-empty when any transactions were rejected. Present but empty when
-   * all transactions passed. The all-rejected case produces an empty transactions list
-   * with all ids here — confirmed by simulator.cpp:processVerifiedProposal.
+   * Symbolic identifiers of REJECTED transactions.
+   *
+   * In Iroha 1 these are cryptographic hashes stored in
+   * `Block_v1.Payload.rejected_transactions_hashes` (block.proto field 6).
+   * In this simulator the transaction's `id` stands in for the hash —
+   * cryptographic hash computation is out of scope.
+   *
+   * Present in every committed block. Non-empty when any transactions were rejected;
+   * empty (but present) when all transactions passed. The all-rejected case produces
+   * an empty `transactions` list with all IDs here (confirmed: simulator.cpp).
    */
-  rejectedTransactionHashes: readonly string[]
+  rejectedTransactionIds: readonly string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +140,31 @@ export function validateProposal(
   transactions: readonly TransactionSpec[],
   worldState: WorldState,
 ): ValidationOutcome {
-  // Precondition guard: reject malformed amount strings before the validation loop.
+  // Precondition: transaction IDs must be unique within a proposal.
+  // Duplicate IDs would corrupt validTxIds / rejectedTransactionIds with repeated entries
+  // and make it impossible to identify which transaction a result refers to.
+  const txIds = new Set(transactions.map((tx) => tx.id))
+  if (txIds.size < transactions.length) {
+    throw new Error(
+      'validateProposal: transaction IDs must be unique within a proposal — ' +
+        'duplicate IDs prevent reliable per-transaction result tracking',
+    )
+  }
+
+  // Precondition: all transactions must use the same asset.
+  // WorldState.balances is keyed by account name without asset information.
+  // A multi-asset proposal would check one asset's balance against a different
+  // asset's transfer amount — producing incorrect accept/reject decisions.
+  const usedAssets = new Set(transactions.map((tx) => tx.asset))
+  if (usedAssets.size > 1) {
+    throw new Error(
+      'validateProposal: multi-asset proposals are not supported — ' +
+        'all transactions must use the same asset. ' +
+        `Found assets: ${[...usedAssets].sort().join(', ')}`,
+    )
+  }
+
+  // Precondition: reject malformed amount strings before the validation loop.
   // In Iroha 1 these fail stateless validation; in the simulator they indicate a
   // programming error in the scenario definition.
   for (const tx of transactions) {

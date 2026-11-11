@@ -111,7 +111,7 @@ export function generateBlockFormationScenario(
     prevBlockHash,
     createdTime,
     transactions: validTransactions,
-    rejectedTransactionHashes: outcome.rejectedTxIds,
+    rejectedTransactionIds: outcome.rejectedTxIds,
   }
   const committedBlock: BlockContent = { ...candidateBlock }
 
@@ -214,15 +214,17 @@ export function generateBlockFormationScenario(
       },
       {
         // Consensus: peers vote on the candidate block via YAC protocol.
-        // consensusOutcome is a distinct event — it must not be confused with block creation
+        // The YAC algorithm is NOT simulated — consensus is assumed to succeed.
+        // consensusOutcome is a distinct event; it must not be confused with block creation
         // (step 9) or commitment (step 11).
         id: 'step-10-yac-consensus',
         componentId: 'yac-consensus',
-        narration: `Peers reach consensus on the candidate block via YAC.`,
+        narration: `Peers vote on the candidate block. Consensus is assumed to succeed — the YAC algorithm is not simulated.`,
         txStateChanges: {
           consensusOutcome: {
             result: 'agreed',
             blockHeight,
+            assumed: true,
           },
         },
       },
