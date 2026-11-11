@@ -432,6 +432,8 @@ describe('UC-01-I-06: candidate-block, consensus-outcome, and committed-block ar
 // ---------------------------------------------------------------------------
 // UC-01-I-07: ScenarioConfig — deterministic height and timestamps
 // ---------------------------------------------------------------------------
+// (tests for valid config inputs — invalid inputs tested in UC-01-I-08 below)
+//
 
 describe('UC-01-I-07: ScenarioConfig injection', () => {
   it('default config produces height=1, prevBlockHash="genesis", createdTime=0', () => {
@@ -484,5 +486,91 @@ describe('UC-01-I-07: ScenarioConfig injection', () => {
       ?.txStateChanges?.['consensusOutcome'] as { result: string; blockHeight: number }
 
     expect(consensus.blockHeight).toBe(10)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UC-01-I-08: ScenarioConfig input validation
+// ---------------------------------------------------------------------------
+
+describe('UC-01-I-08: ScenarioConfig input validation', () => {
+  it('throws when chainHeight is negative', () => {
+    expect(() =>
+      generateBlockFormationScenario(ALL_PASS_TXS, WORLD, { chainHeight: -1 }),
+    ).toThrow(/chainHeight/)
+  })
+
+  it('throws when chainHeight is a non-integer', () => {
+    expect(() =>
+      generateBlockFormationScenario(ALL_PASS_TXS, WORLD, { chainHeight: 1.5 }),
+    ).toThrow(/chainHeight/)
+  })
+
+  it('throws when createdTime is negative', () => {
+    expect(() =>
+      generateBlockFormationScenario(ALL_PASS_TXS, WORLD, { createdTime: -1 }),
+    ).toThrow(/createdTime/)
+  })
+
+  it('throws when createdTime is a non-integer', () => {
+    expect(() =>
+      generateBlockFormationScenario(ALL_PASS_TXS, WORLD, { createdTime: 1.5 }),
+    ).toThrow(/createdTime/)
+  })
+
+  it('accepts chainHeight=0 and createdTime=0 as valid lower boundaries', () => {
+    expect(() =>
+      generateBlockFormationScenario(ALL_PASS_TXS, WORLD, { chainHeight: 0, createdTime: 0 }),
+    ).not.toThrow()
+  })
+
+  it('accepts large valid integers for both fields', () => {
+    expect(() =>
+      generateBlockFormationScenario(ALL_PASS_TXS, WORLD, {
+        chainHeight: 1_000_000,
+        createdTime: 1_700_000_000_000,
+      }),
+    ).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UC-01-I-09: Empty proposal vs all-rejected — distinct narration
+// ---------------------------------------------------------------------------
+
+describe('UC-01-I-09: empty proposal narration is distinct from all-rejected narration', () => {
+  it('step-7 narration for empty proposal mentions "No transactions were submitted"', () => {
+    const emptyWorld: WorldState = {
+      balances: {},
+      accounts: new Set<string>(),
+      assets: { USD: 0 },
+    }
+    const scenario = generateBlockFormationScenario([], emptyWorld)
+    const sfStep = scenario.steps.find((s) => s.componentId === 'stateful-validation')
+    expect(sfStep?.narration).toContain('No transactions were submitted')
+  })
+
+  it('step-7 narration for all-rejected mentions "fail stateful validation"', () => {
+    const scenario = generateBlockFormationScenario(ALL_REJECT_TXS, WORLD)
+    const sfStep = scenario.steps.find((s) => s.componentId === 'stateful-validation')
+    expect(sfStep?.narration).toContain('fail stateful validation')
+  })
+
+  it('step-8 narration for empty proposal does not say "rejected"', () => {
+    const emptyWorld: WorldState = {
+      balances: {},
+      accounts: new Set<string>(),
+      assets: { USD: 0 },
+    }
+    const scenario = generateBlockFormationScenario([], emptyWorld)
+    const vpStep = scenario.steps.find((s) => s.componentId === 'verified-proposal')
+    expect(vpStep?.narration).toContain('no transactions were submitted')
+    expect(vpStep?.narration).not.toContain('were rejected')
+  })
+
+  it('step-8 narration for all-rejected says "were rejected"', () => {
+    const scenario = generateBlockFormationScenario(ALL_REJECT_TXS, WORLD)
+    const vpStep = scenario.steps.find((s) => s.componentId === 'verified-proposal')
+    expect(vpStep?.narration).toContain('were rejected')
   })
 })

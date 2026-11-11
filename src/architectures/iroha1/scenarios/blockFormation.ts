@@ -31,6 +31,12 @@ function buildValidationNarration(
   const v = outcome.validTxIds.length
   const r = outcome.rejectedTxIds.length
 
+  // Empty proposal: no transactions were submitted — distinct from all-rejected.
+  // In Iroha 1 the Ordering Service would not create an empty proposal in production;
+  // this is a simulator-only degenerate case (no timeout fires with zero queued transactions).
+  if (txCount === 0) {
+    return 'No transactions were submitted. Stateful validation has nothing to process.'
+  }
   if (r === 0) {
     return `All ${txCount} ${plural(txCount, 'transaction')} pass stateful validation against the World State View.`
   }
@@ -85,6 +91,22 @@ export function generateBlockFormationScenario(
   worldState: WorldState,
   config?: ScenarioConfig,
 ): Scenario {
+  // Validate ScenarioConfig inputs before any computation.
+  if (config?.chainHeight !== undefined) {
+    if (!Number.isInteger(config.chainHeight) || config.chainHeight < 0) {
+      throw new Error(
+        `ScenarioConfig.chainHeight must be a non-negative integer — got ${config.chainHeight}`,
+      )
+    }
+  }
+  if (config?.createdTime !== undefined) {
+    if (!Number.isInteger(config.createdTime) || config.createdTime < 0) {
+      throw new Error(
+        `ScenarioConfig.createdTime must be a non-negative integer — got ${config.createdTime}`,
+      )
+    }
+  }
+
   // Single call to the execution engine — never recalculated during playback.
   const outcome: ValidationOutcome = validateProposal(transactions, worldState)
 
@@ -122,6 +144,14 @@ export function generateBlockFormationScenario(
   const category = rejectedCount === 0 ? 'success' : 'other'
   const firstTx = transactions[0]
 
+  // Array-flattening limitation for future inspector integration:
+  // Each step's `txStateChanges` is a flat Record<string, unknown>. The XState machine
+  // accumulates these as an array (selectAppliedTxStateChanges). If a future inspector
+  // merges all applied changes into a single object (e.g. Object.assign({}, ...changes)),
+  // later keys will silently overwrite earlier ones with the same name. The keys used here
+  // (proposal, validationOutcome, verifiedProposal, candidateBlock, consensusOutcome,
+  // committedBlock) are intentionally distinct across steps to avoid this. Do not reuse
+  // a key across multiple steps without redesigning the inspector merge strategy.
   return {
     id: 'uc01-block-formation',
     name: `Block Formation — ${txCount} ${plural(txCount, 'transaction')}`,
@@ -189,7 +219,9 @@ export function generateBlockFormationScenario(
         id: 'step-8-verified-proposal',
         componentId: 'verified-proposal',
         narration:
-          validCount === 0
+          txCount === 0
+            ? 'Verified Proposal is empty — no transactions were submitted. An empty block will be committed per Iroha v1.4.0 behavior.'
+            : validCount === 0
             ? `Verified Proposal is empty — all ${txCount} ${plural(txCount, 'transaction')} were rejected. An empty block will still be committed per Iroha v1.4.0 behavior.`
             : `Verified Proposal contains ${validCount} ${plural(validCount, 'transaction')}.`,
         txStateChanges: {

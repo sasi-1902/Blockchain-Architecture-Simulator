@@ -140,6 +140,20 @@ export function validateProposal(
   transactions: readonly TransactionSpec[],
   worldState: WorldState,
 ): ValidationOutcome {
+  // Precondition: all asset precisions must be integers in the Iroha 1 uint8 range [0, 255].
+  // Source: Asset::precision() returns PrecisionType (uint8) in
+  //         shared_model/interfaces/common_objects/asset.hpp.
+  // Non-integer or out-of-range values indicate a misconfigured WorldState.
+  for (const [assetId, precision] of Object.entries(worldState.assets)) {
+    if (!Number.isInteger(precision) || precision < 0 || precision > 255) {
+      throw new Error(
+        `WorldState asset "${assetId}": precision ${precision} is not a valid Iroha 1 asset precision — ` +
+          'must be an integer in the range 0–255 (uint8). ' +
+          'Source: Asset::precision() in shared_model/interfaces/common_objects/asset.hpp',
+      )
+    }
+  }
+
   // Precondition: transaction IDs must be unique within a proposal.
   // Duplicate IDs would corrupt validTxIds / rejectedTransactionIds with repeated entries
   // and make it impossible to identify which transaction a result refers to.
@@ -248,7 +262,14 @@ export function validateProposal(
 /**
  * Apply a list of already-validated (committed) transactions to an initial balance map.
  * Used to compute the World State View after a committed block.
- * Unlike validateProposal, this function trusts that every supplied transaction is valid.
+ *
+ * @internal — callers MUST supply only transactions from `ValidationOutcome.validTxIds`.
+ * Passing unvalidated transactions is a programming error: the function will throw if
+ * any balance goes negative, which is the postcondition invariant for committed transactions
+ * (a valid transaction can only debit an amount the sender can cover).
+ *
+ * Unlike `validateProposal`, this function does not re-check individual transfer rules;
+ * it only applies the balance deltas and asserts the result is non-negative.
  */
 export function applyTransactions(
   initialBalances: Readonly<Record<string, bigint>>,
@@ -262,6 +283,19 @@ export function applyTransactions(
     const scaled = scaleAmount(tx.amount, assetPrecision)
     balances.set(tx.from, (balances.get(tx.from) ?? 0n) - scaled)
     balances.set(tx.to, (balances.get(tx.to) ?? 0n) + scaled)
+  }
+
+  // Postcondition: no balance may go negative after applying committed transactions.
+  // A negative balance means an unvalidated transaction was supplied — only
+  // transactions from ValidationOutcome.validTxIds are safe to pass here.
+  for (const [account, balance] of balances) {
+    if (balance < 0n) {
+      throw new Error(
+        `applyTransactions: account "${account}" reached a negative balance (${balance}) — ` +
+          'only pre-validated transactions from ValidationOutcome.validTxIds may be committed. ' +
+          'Use validateProposal to determine which transactions are safe to apply.',
+      )
+    }
   }
 
   return Object.fromEntries(balances)

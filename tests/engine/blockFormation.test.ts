@@ -584,6 +584,95 @@ describe('serializeValidationOutcome', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// UC-01-E-12: Asset precision validation — integer in range 0–255
+// Source: Asset::precision() returns uint8 in Iroha 1 (0–255 inclusive).
+// ---------------------------------------------------------------------------
+
+describe('UC-01-E-12: asset precision out of range throws precondition error', () => {
+  it('throws when an asset has precision below 0', () => {
+    const world: WorldState = {
+      balances: { alice: 100n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: -1 },
+    }
+    expect(() => validateProposal([tx('tx1', 'alice', 'bob', '10')], world)).toThrow(
+      /valid Iroha 1 asset precision/,
+    )
+  })
+
+  it('throws when an asset has precision above 255', () => {
+    const world: WorldState = {
+      balances: { alice: 100n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 256 },
+    }
+    expect(() => validateProposal([tx('tx1', 'alice', 'bob', '10')], world)).toThrow(
+      /valid Iroha 1 asset precision/,
+    )
+  })
+
+  it('throws when an asset has a non-integer precision', () => {
+    const world: WorldState = {
+      balances: { alice: 100n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 1.5 },
+    }
+    expect(() => validateProposal([tx('tx1', 'alice', 'bob', '10')], world)).toThrow(
+      /valid Iroha 1 asset precision/,
+    )
+  })
+
+  it('accepts precision at the lower boundary (0)', () => {
+    const world: WorldState = {
+      balances: {},
+      accounts: new Set<string>(),
+      assets: { USD: 0 },
+    }
+    expect(() => validateProposal([], world)).not.toThrow()
+  })
+
+  it('accepts precision at the upper boundary (255)', () => {
+    const world: WorldState = {
+      balances: {},
+      accounts: new Set<string>(),
+      assets: { MICRO: 255 },
+    }
+    expect(() => validateProposal([], world)).not.toThrow()
+  })
+
+  it('validates all assets in the map, not just the one referenced by transactions', () => {
+    const world: WorldState = {
+      balances: { alice: 100n },
+      accounts: new Set(['alice', 'bob']),
+      assets: { USD: 2, ETH: -5 },
+    }
+    expect(() => validateProposal([tx('tx1', 'alice', 'bob', '10', 'USD')], world)).toThrow(
+      /valid Iroha 1 asset precision/,
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// applyTransactions: postcondition guard rejects unvalidated transactions
+// ---------------------------------------------------------------------------
+
+describe('applyTransactions: negative-balance postcondition guard', () => {
+  it('throws when an unvalidated transaction would produce a negative balance', () => {
+    // alice has 10n but tx debits 50n — this would only happen if the caller bypassed
+    // validateProposal and passed unvalidated transactions directly.
+    expect(() =>
+      applyTransactions({ alice: 10n }, [tx('tx1', 'alice', 'bob', '50')], { USD: 0 }),
+    ).toThrow(/negative balance/)
+  })
+
+  it('does not throw when all balances remain non-negative', () => {
+    expect(() =>
+      applyTransactions({ alice: 100n }, [tx('tx1', 'alice', 'bob', '30')], { USD: 0 }),
+    ).not.toThrow()
+  })
+})
+
 describe('receiver with no initial balance receives funds', () => {
   it('correctly initialises receiver balance from zero when first receiving', () => {
     const world: WorldState = {
