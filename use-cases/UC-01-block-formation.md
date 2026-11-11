@@ -1,4 +1,4 @@
-# UC-03: Multiple Transactions and Block Formation
+# UC-01: Multiple Transactions and Block Formation
 
 ## Objective and Protocol Scope
 
@@ -38,7 +38,7 @@ Repository: https://github.com/hyperledger/iroha/tree/1.4.0
 The most recent stable 1.x release is `1.6.0`. The files referenced below exist in both
 releases; behavior was verified against `1.4.0`.
 
-### Source files governing UC-03 behavior
+### Source files governing UC-01 behavior
 
 Paths are relative to the repository root at tag `1.4.0`.
 
@@ -82,7 +82,7 @@ Paths are relative to the repository root at tag `1.4.0`.
 ### Two-layer design
 
 **Finding addressed:** The XState machine is a playback controller, not a transaction execution
-engine. UC-03 requires genuine state-dependent computation: which transactions pass or fail depends
+engine. UC-01 requires genuine state-dependent computation: which transactions pass or fail depends
 on the input balances and the proposal order, not on predetermined scenario data.
 
 The implementation uses two distinct layers:
@@ -111,7 +111,7 @@ This function:
 
 The function is deterministic. Given the same inputs it always returns the same outputs. The
 outcome changes if the input balances or transaction order changes — this is the property that
-distinguishes UC-03 from a scripted playback.
+distinguishes UC-01 from a scripted playback.
 
 #### Layer 2 — Scenario generator (uses execution engine output)
 
@@ -169,7 +169,7 @@ accumulated twice during replay.
 types, not untyped arrays inside `Record<string, unknown>`.
 
 The following types are proposed for `src/engine/blockFormation.ts`. They are specific to the
-UC-03 execution engine and do not change `src/engine/types.ts`.
+UC-01 execution engine and do not change `src/engine/types.ts`.
 
 ### `WorldState`
 
@@ -308,12 +308,12 @@ export interface BlockContent {
 }
 ```
 
-### Step state shape for UC-03 scenario steps
+### Step state shape for UC-01 scenario steps
 
 The existing `ScenarioStep.txStateChanges: Record<string, unknown>` is architecture-agnostic.
-UC-03 scenario steps that carry validation data will embed a typed sub-structure at a known key,
+UC-01 scenario steps that carry validation data will embed a typed sub-structure at a known key,
 accessed through a typed helper rather than directly. The generic engine never reads this key;
-only UC-03–specific UI code does.
+only UC-01–specific UI code does.
 
 Proposal step:
 ```ts
@@ -345,7 +345,7 @@ and assembles the step data from the returned `ValidationOutcome`. They are neve
 
 ## Transaction Batches vs. Ordinary Proposals
 
-**Finding addressed:** Iroha 1 has a distinct concept of transaction batches. UC-03 uses ordinary
+**Finding addressed:** Iroha 1 has a distinct concept of transaction batches. UC-01 uses ordinary
 transactions. The difference matters for correctness and must be explicit.
 
 ### Ordinary (independent) transactions
@@ -358,7 +358,7 @@ guaranteed atomicity** between independently submitted transactions in a proposa
 - Ordering within the proposal reflects receipt order at the Ordering Service.
 - A failure of one transaction has no protocol-level effect on the others.
 
-UC-03 models this case. It is the most common submission pattern and the clearest demonstration
+UC-01 models this case. It is the most common submission pattern and the clearest demonstration
 of the Proposal / Verified Proposal distinction.
 
 ### Iroha 1 transaction batches
@@ -375,8 +375,8 @@ Atomic batches implement all-or-nothing semantics at the application level: a mu
 (A→intermediate, intermediate→B) either completes fully or not at all. Source confirmed at
 `irohad/validation/impl/stateful_validator_impl.cpp`, tag `1.4.0`.
 
-**UC-03 uses ordinary transactions, not batches.** Batches are out of scope for the initial
-implementation. A later sub-scenario (UC-03B) could demonstrate `ATOMIC` batch rejection as a
+**UC-01 uses ordinary transactions, not batches.** Batches are out of scope for the initial
+implementation. A later sub-scenario (UC-01B) could demonstrate `ATOMIC` batch rejection as a
 contrast.
 
 ---
@@ -395,7 +395,7 @@ contrast.
 
 No new components are added. The pipeline is unchanged from the MVP.
 
-| Component ID | Role in UC-03 |
+| Component ID | Role in UC-01 |
 |---|---|
 | `client` | Each transaction originates here (submitted independently) |
 | `torii` | Accepts each transaction in turn |
@@ -571,7 +571,7 @@ Rejected transactions have no effect on balances regardless of their position in
 ## World State Model
 
 **Finding addressed:** `computeCumulativeBalances` is insufficient as a general-purpose state
-model for UC-03.
+model for UC-01.
 
 ### Limitation of `computeCumulativeBalances`
 
@@ -582,13 +582,13 @@ model for UC-03.
 
 This is designed for UC-00's pattern: one transaction per committed run, with manually authored
 `balanceChange: -10` / `balanceChange: +10` annotations in the scenario step data. It is
-**not suitable as the general state model for UC-03** because:
+**not suitable as the general state model for UC-01** because:
 - Balance changes must be computed from the transaction list, not read from manually authored paths.
 - Multiple transactions per block affect the same entity with multiple deltas.
 - The function is tightly coupled to the dot-path annotation convention, making it fragile as a
   shared engine primitive.
 
-### Proposed approach for UC-03
+### Proposed approach for UC-01
 
 Add a new pure function alongside `computeCumulativeBalances` (do not replace it — UC-00 must
 continue to work):
@@ -777,7 +777,7 @@ If any fail, the savepoint wrapper is destroyed without `release()`, which trigg
 rollback of all batch state changes. All transactions in the failed batch are added to the
 rejected list with reason "Another transaction failed the batch." This is confirmed at
 [`validateTransactions` in `stateful_validator_impl.cpp`](https://github.com/hyperledger/iroha/blob/1.4.0/irohad/validation/impl/stateful_validator_impl.cpp).
-UC-03 uses ordinary (non-batch) transactions, so this code path is not exercised — but it
+UC-01 uses ordinary (non-batch) transactions, so this code path is not exercised — but it
 is documented here for completeness and future UC reference.
 
 ---
@@ -794,7 +794,7 @@ Note on test-case notation: `balances` are `bigint` scaled to asset precision. F
 precision=0 assets (whole units), `100n` = 100 units. For precision=2 assets, `1050n` = 10.50
 units. `assets: { USD: 0 }` means USD has precision=0.
 
-#### UC-03-E-01: Valid transaction reduces provisional balance and passes
+#### UC-01-E-01: Valid transaction reduces provisional balance and passes
 
 ```
 Given: WorldState { balances: { alice: 100n }, accounts: {alice, bob}, assets: { USD: 0 } }
@@ -806,7 +806,7 @@ Then:  rejectedTxIds = []
 Then:  finalWorldState.balances = { alice: 70n, bob: 30n }
 ```
 
-#### UC-03-E-02: Insufficient balance rejection
+#### UC-01-E-02: Insufficient balance rejection
 
 ```
 Given: WorldState { balances: { alice: 20n }, accounts: {alice, bob}, assets: { USD: 0 } }
@@ -818,7 +818,7 @@ Then:  rejectedTxIds = ['tx1']
 Then:  finalWorldState.balances = { alice: 20n } (unchanged)
 ```
 
-#### UC-03-E-03: Partial failure — reference scenario (Scenario B)
+#### UC-01-E-03: Partial failure — reference scenario (Scenario B)
 
 ```
 Given: WorldState { balances: { alice: 100n, bob: 20n, carol: 30n }, accounts: {alice, bob, carol}, assets: { USD: 0 } }
@@ -833,7 +833,7 @@ Then:  rejectedTxIds = ['tx2']
 Then:  finalWorldState.balances = { alice: 80n, bob: 40n, carol: 30n }
 ```
 
-#### UC-03-E-04: Order dependency — reversing two conflicting transactions changes both outcomes
+#### UC-01-E-04: Order dependency — reversing two conflicting transactions changes both outcomes
 
 ```
 Given: WorldState { balances: { alice: 50n }, accounts: {alice, bob, carol}, assets: { USD: 0 } }
@@ -852,7 +852,7 @@ Then:  results[1].status = 'REJECTED'  (30n < 40n)
 This test proves the execution engine derives its outcome from input order, not from hardcoded
 expectations.
 
-#### UC-03-E-05: Receiver also appears as sender (later transaction)
+#### UC-01-E-05: Receiver also appears as sender (later transaction)
 
 ```
 Given: WorldState { balances: { alice: 100n, bob: 20n }, accounts: {alice, bob}, assets: { USD: 0 } }
@@ -864,7 +864,7 @@ Then:  results[1] = { txId: 'tx2', status: 'VALID', senderProvisionalBalance: 10
 Then:  finalWorldState.balances = { alice: 110n, bob: 10n }
 ```
 
-#### UC-03-E-06: Sender not found
+#### UC-01-E-06: Sender not found
 
 ```
 Given: WorldState { balances: { bob: 20n }, accounts: {bob}, assets: { USD: 0 } }
@@ -874,7 +874,7 @@ When:  validateProposal([tx1], worldState)
 Then:  results[0] = { txId: 'tx1', status: 'REJECTED', reason: 'SENDER_NOT_FOUND' }
 ```
 
-#### UC-03-E-07: `applyTransactions` reflects only committed transactions
+#### UC-01-E-07: `applyTransactions` reflects only committed transactions
 
 ```
 Given: initial balances { alice: 100n, bob: 20n, carol: 30n }
@@ -887,7 +887,7 @@ Then:  result = { alice: 80n, bob: 40n, carol: 30n }
 This test verifies that `applyTransactions` takes only the committed transaction list, not the
 full proposal, and that excluded transactions have no effect.
 
-#### UC-03-E-08: All-rejected — empty block committed, balances unchanged
+#### UC-01-E-08: All-rejected — empty block committed, balances unchanged
 
 ```
 Given: WorldState { balances: { alice: 5n }, accounts: {alice, bob}, assets: { USD: 0 } }
@@ -939,7 +939,7 @@ There is no guard preventing block creation when `proposal->transactions()` is e
 The all-rejected case produces a committed block with height incremented, zero transactions,
 and all original tx hashes in `rejected_transactions_hashes` (block.proto field 6).
 
-#### UC-03-E-09a: Valid fractional quantity within asset precision
+#### UC-01-E-09a: Valid fractional quantity within asset precision
 
 ```
 Given: WorldState { balances: { alice: 1050n }, accounts: {alice, bob}, assets: { USD: 2 } }
@@ -955,7 +955,7 @@ Then:  finalWorldState.balances = { alice: 0n, bob: 1050n }
 Iroha 1 precision rule: `asset.precision >= amount.precision()` must hold.
 "10.50" has precision 2; USD with precision=2 satisfies `2 >= 2`. ✓
 
-#### UC-03-E-09b: Amount precision below asset precision is accepted
+#### UC-01-E-09b: Amount precision below asset precision is accepted
 
 ```
 Given: WorldState { balances: { alice: 1000n }, accounts: {alice, bob}, assets: { USD: 2 } }
@@ -968,7 +968,7 @@ Then:  finalWorldState.balances = { alice: 500n, bob: 500n }
   (500n = 5.00 at precision=2)
 ```
 
-#### UC-03-E-09c: Excess decimal precision exceeds asset precision — REJECTED
+#### UC-01-E-09c: Excess decimal precision exceeds asset precision — REJECTED
 
 ```
 Given: WorldState { balances: { alice: 10000n }, accounts: {alice, bob}, assets: { USD: 2 } }
@@ -985,7 +985,7 @@ Then:  finalWorldState.balances = { alice: 10000n }  (unchanged)
 Source: SQL check code 5 in `postgres_command_executor.cpp`:
 `SELECT 5, count(1) = 1 FROM asset WHERE asset_id = :asset_id AND precision >= :precision`
 
-#### UC-03-E-09d: Malformed amount string throws a precondition error
+#### UC-01-E-09d: Malformed amount string throws a precondition error
 
 ```
 Given: WorldState { balances: { alice: 1000n }, accounts: {alice, bob}, assets: { USD: 2 } }
@@ -1003,7 +1003,7 @@ non-digit characters, and other inputs that Amount parses as "NaN"
 
 ### Integration tests — scenario machine with generated scenario
 
-#### UC-03-I-01: Generated scenario step count matches pipeline stages
+#### UC-01-I-01: Generated scenario step count matches pipeline stages
 
 ```
 Given: validateProposal produces a ValidationOutcome
@@ -1012,7 +1012,7 @@ Then:  scenario.steps.length equals the number of Iroha v1 pipeline stages (same
 Then:  each step references a component ID that exists in iroha1Architecture.components
 ```
 
-#### UC-03-I-02: txStateChanges at the Stateful Validation step carries the ValidationOutcome
+#### UC-01-I-02: txStateChanges at the Stateful Validation step carries the ValidationOutcome
 
 ```
 Given: a generated scenario (Scenario B)
@@ -1021,7 +1021,7 @@ Then:  currentStep.txStateChanges.validationOutcome is structurally equal to the
        ValidationOutcome returned by validateProposal for the same inputs
 ```
 
-#### UC-03-I-03: txStateChanges at the Commit step carries the BlockContent
+#### UC-01-I-03: txStateChanges at the Commit step carries the BlockContent
 
 ```
 Given: a generated scenario (Scenario B)
@@ -1030,7 +1030,7 @@ Then:  currentStep.txStateChanges.block.transactions contains only [ tx1, tx3 ]
 Then:  currentStep.txStateChanges.block.rejectedTransactionHashes contains [ tx2.id ]
 ```
 
-#### UC-03-I-04: Playback controls work correctly on a generated scenario
+#### UC-01-I-04: Playback controls work correctly on a generated scenario
 
 ```
 Given: a generated scenario
@@ -1042,7 +1042,7 @@ When:  RESET is sent
 Then:  the simulation machine is in the initial paused state with stepIndex = -1
 ```
 
-#### UC-03-I-05: Same inputs always produce the same generated scenario (determinism)
+#### UC-01-I-05: Same inputs always produce the same generated scenario (determinism)
 
 ```
 Given: the same TransactionSpec[] and WorldState
@@ -1052,32 +1052,32 @@ Then:  both calls return structurally equal Scenario objects
 
 ### End-to-end tests (Playwright)
 
-#### UC-03-P-01: Proposal step lists all submitted transactions
+#### UC-01-P-01: Proposal step lists all submitted transactions
 
 When the scenario reaches the Proposal step, the UI shows all submitted transaction summaries
 (e.g., "alice → bob: 30 USD").
 
-#### UC-03-P-02: Stateful Validation step shows per-transaction results
+#### UC-01-P-02: Stateful Validation step shows per-transaction results
 
 When the scenario reaches Stateful Validation, each transaction is labeled ✓ VALID or ✕ REJECTED
 with its rejection reason. The provisional sender balance is shown for each.
 
-#### UC-03-P-03: Verified Proposal shows only passing transactions
+#### UC-01-P-03: Verified Proposal shows only passing transactions
 
 When the scenario reaches Verified Proposal, only Tx 1 and Tx 3 appear; Tx 2 is absent.
 The UI indicates how many were rejected (e.g., "2 of 3 valid").
 
-#### UC-03-P-04: Block card includes both committed transactions
+#### UC-01-P-04: Block card includes both committed transactions
 
 When the scenario reaches Commit, the block card lists Tx 1 and Tx 3. It also indicates that
 one transaction hash was rejected (the symbolic Tx 2 ID).
 
-#### UC-03-P-05: World State View after commit matches computed balances
+#### UC-01-P-05: World State View after commit matches computed balances
 
 After Commit, the World State View shows Alice = 80, Bob = 40, Carol = 30.
 These values must match `applyTransactions` applied to the committed transaction list.
 
-#### UC-03-P-06: Changing transaction order changes which transaction fails
+#### UC-01-P-06: Changing transaction order changes which transaction fails
 
 The same test executed with Tx 1 and Tx 2 order-swapped in the input (Tx 2 first) must result
 in Tx 2 passing and Tx 1 failing, with correspondingly different post-commit balances.
@@ -1175,10 +1175,10 @@ No changes to `src/engine/simulationMachine.ts`.
 ### 3. `src/engine/types.ts` — additive extension for multi-transaction scenarios
 
 Add optional `transactions?: readonly TransactionSpec[]` to `Scenario`. Single-transaction
-scenarios (UC-00) continue to use only `initialTx`. UC-03 scenarios populate `transactions`
+scenarios (UC-00) continue to use only `initialTx`. UC-01 scenarios populate `transactions`
 (UC-00 compatibility is maintained).
 
-### 4. `src/architectures/iroha1/index.ts` — register UC-03 scenario
+### 4. `src/architectures/iroha1/index.ts` — register UC-01 scenario
 
 Add the generated scenario to `scenarios[]` alongside `aliceSendsTenUsdToBobScenario`. Because
 `generateBlockFormationScenario` takes runtime inputs, the architecture module registers a
@@ -1197,10 +1197,10 @@ default scenario using the reference starting balances.
 
 | File | Assessment |
 |------|-----------|
-| `src/engine/simulationMachine.ts` | **Unchanged** — drives generated UC-03 steps exactly as UC-00 |
-| `src/engine/worldState.ts` — `computeCumulativeBalances` | **Kept as-is for UC-00**; not used for UC-03 balance computation. UC-03 uses `applyTransactions` (new function in `blockFormation.ts`) instead. |
-| `src/engine/txStateChange.ts` — `flattenTxStateChange` | **Unchanged** — still used by UC-00; UC-03 UI reads typed `txStateChanges` sub-fields directly via typed helpers, not via flattened paths |
-| `src/engine/validateArchitecture.ts` | **Unchanged** — UC-03 scenario validates against the same schema |
+| `src/engine/simulationMachine.ts` | **Unchanged** — drives generated UC-01 steps exactly as UC-00 |
+| `src/engine/worldState.ts` — `computeCumulativeBalances` | **Kept as-is for UC-00**; not used for UC-01 balance computation. UC-01 uses `applyTransactions` (new function in `blockFormation.ts`) instead. |
+| `src/engine/txStateChange.ts` — `flattenTxStateChange` | **Unchanged** — still used by UC-00; UC-01 UI reads typed `txStateChanges` sub-fields directly via typed helpers, not via flattened paths |
+| `src/engine/validateArchitecture.ts` | **Unchanged** — UC-01 scenario validates against the same schema |
 | `src/engine/registry.ts` | **Unchanged** |
 | `src/engine/highlightGraph.ts` | **Unchanged** |
 | `src/engine/animationPath.ts` | **Unchanged** |
@@ -1241,8 +1241,8 @@ Test files (11):
 - `tests/engine/validateArchitecture.test.ts`
 - `tests/engine/worldState.test.ts`
 
-No UC-03 engine tests exist yet. All 81 tests cover existing UC-00 (happy-path) behavior.
-UC-03 engine tests will be added to `tests/engine/blockFormation.test.ts`.
+No UC-01 engine tests exist yet. All 81 tests cover existing UC-00 (happy-path) behavior.
+UC-01 engine tests will be added to `tests/engine/blockFormation.test.ts`.
 
 ---
 

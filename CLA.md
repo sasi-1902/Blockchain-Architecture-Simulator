@@ -10,26 +10,26 @@ We will initially support **Hyperledger Iroha 1**, with the intention of extendi
 
 Implement four independently selectable use cases:
 
-1. **UC-03: Multiple Transactions and Block Formation**
-2. **UC-01: Double-Spending Prevention**
-3. **UC-05: Blockchain Tampering and Integrity Verification**
-4. **UC-06: Network Partition and Recovery**
+1. **UC-01: Multiple Transactions and Block Formation**
+2. **UC-02: Double-Spending Prevention**
+3. **UC-03: Blockchain Tampering and Integrity Verification**
+4. **UC-04: Network Partition and Recovery**
 
 This is the preferred implementation order based on technical dependencies, not a requirement to combine scenarios.
 
 Each use case must work independently while sharing reusable simulation infrastructure.
 
-**Begin with UC-03.**
+**Begin with UC-01.**
 
 ## 2. Documentation Rules
 
 Maintain only these five project documentation files:
 
 - `CLA.md` — Central engineering instructions.
-- `use-cases/UC-01-double-spending.md`
-- `use-cases/UC-03-block-formation.md`
-- `use-cases/UC-05-tampering-integrity.md`
-- `use-cases/UC-06-network-partition.md`
+- `use-cases/UC-01-block-formation.md`
+- `use-cases/UC-02-double-spending.md`
+- `use-cases/UC-03-tampering-integrity.md`
+- `use-cases/UC-04-network-partition.md`
 
 `README.md` is an exception. Do not modify it until the project reaches a reviewed, functional release.
 
@@ -127,19 +127,19 @@ The project owners will inspect the actual source code and behavior, not just yo
 
 ## 7. Immediate Assignment
 
-Start with **UC-03: Multiple Transactions and Block Formation**.
+Start with **UC-01: Multiple Transactions and Block Formation**.
 
 First, inspect the repository and research Iroha 1's transaction processing, ordering, proposals, stateful validation, block creation, consensus, and commitment.
 
 Establish the exact protocol version and define the complete use case in:
 
-`use-cases/UC-03-block-formation.md`
+`use-cases/UC-01-block-formation.md`
 
 Include configurable transaction inputs, processing rules, proposal and block behavior, expected state changes, rejection conditions, edge cases, and testable acceptance criteria.
 
 Identify reusable infrastructure needed by the remaining three use cases.
 
-**Your first deliverable is the researched UC-03 specification and a concise codebase assessment—not implementation code.**
+**Your first deliverable is the researched UC-01 specification and a concise codebase assessment—not implementation code.**
 
 Present both for review and await approval before making functional changes.
 
