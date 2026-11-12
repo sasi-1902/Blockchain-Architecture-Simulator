@@ -4,6 +4,7 @@ import { iroha1Components } from './components'
 import { iroha1Connections } from './connections'
 import { iroha1Concepts } from './concepts'
 import { aliceSendsTenUsdToBobScenario } from './scenarios/happyPath'
+import { uc01BlockFormationPlaceholderScenario } from './scenarios/uc01BlockFormationPlaceholder'
 
 const rawIroha1Architecture: BlockchainArchitecture = {
   id: 'iroha1',
@@ -25,7 +26,7 @@ const rawIroha1Architecture: BlockchainArchitecture = {
   components: iroha1Components,
   connections: iroha1Connections,
   concepts: iroha1Concepts,
-  scenarios: [aliceSendsTenUsdToBobScenario],
+  scenarios: [aliceSendsTenUsdToBobScenario, uc01BlockFormationPlaceholderScenario],
 }
 
 export const iroha1Architecture: BlockchainArchitecture = validateArchitecture(rawIroha1Architecture)

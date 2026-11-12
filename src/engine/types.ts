@@ -80,6 +80,19 @@ export interface Scenario {
     [key: string]: unknown
   }
 
+  /**
+   * Multi-transaction input for UC-01 and later use cases.
+   * Single-transaction scenarios (happy path) leave this undefined and use `initialTx`.
+   * When present, this is the authoritative transaction list; `initialTx` is a placeholder.
+   */
+  transactions?: ReadonlyArray<{
+    readonly id: string
+    readonly from: string
+    readonly to: string
+    readonly asset: string
+    readonly amount: string
+  }>
+
   steps: ScenarioStep[]
 }
 

@@ -93,10 +93,17 @@ describe('iroha1Architecture', () => {
     }
   })
 
-  it('implements only the "Alice sends 10 USD to Bob" happy-path scenario', () => {
-    expect(iroha1Architecture.scenarios).toHaveLength(1)
+  it('includes the "Alice sends 10 USD to Bob" happy-path scenario as scenarios[0]', () => {
+    expect(iroha1Architecture.scenarios.length).toBeGreaterThanOrEqual(1)
     expect(iroha1Architecture.scenarios[0].id).toBe('alice-sends-10-usd-to-bob')
     expect(iroha1Architecture.scenarios[0].category).toBe('success')
+  })
+
+  it('includes the UC-01 multi-transaction placeholder scenario', () => {
+    const uc01 = iroha1Architecture.scenarios.find((s) => s.id === 'uc01-block-formation-placeholder')
+    expect(uc01).toBeDefined()
+    expect(uc01?.transactions).toHaveLength(3)
+    expect(uc01?.steps).toHaveLength(11)
   })
 
   it('orders the happy-path scenario steps per DESIGN.md §10, including Proposal and Verified Proposal waypoints', () => {
