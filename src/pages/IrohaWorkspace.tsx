@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { ArchitectureDiagram, type PhaseLabel } from '../components/diagram/ArchitectureDiagram'
 import { BlockCreationPanel, type BlockStage, type CommittedBlock } from '../components/diagram/BlockCreationPanel'
 import { ComponentDrawer } from '../components/drawer/ComponentDrawer'
@@ -94,59 +94,66 @@ function ScenarioRunner({
   const activeComponentId = isSimulationOpen ? (currentStep?.componentId ?? null) : null
 
   const [committedBlocks, setCommittedBlocks] = useState<CommittedBlock[]>([])
-  const hasRecordedRunRef = useRef(false)
 
-  useLayoutEffect(() => {
-    if (isSimulationOpen && isComplete && !hasRecordedRunRef.current) {
-      hasRecordedRunRef.current = true
+  // Guard that resets only on explicit Reset/Make-Another-Transaction actions,
+  // not on scrubbing back and forth. Using state (not a ref) so the render-time
+  // setState pattern below can read it without violating react-hooks/refs.
+  const [hasCommittedThisRun, setHasCommittedThisRun] = useState(false)
 
-      if (scenario.transactions) {
-        const blockData = accumulatedChanges.committedBlock as
-          | { transactions: Array<{ from: string; to: string; asset: string; amount: string }>; rejectedTransactionIds: string[] }
-          | undefined
+  // Record the committed block the first time the simulation reaches completion
+  // in a given run. This is the React-recommended "setState during render" pattern
+  // for deriving state from other state changes.
+  if (isSimulationOpen && isComplete && !hasCommittedThisRun) {
+    setHasCommittedThisRun(true)
 
-        setCommittedBlocks((prev) => [
-          ...prev,
-          {
-            number: prev.length + 1,
-            transaction: scenario.initialTx,
-            transactions: blockData?.transactions?.map((tx) => ({
-              from: tx.from,
-              to: tx.to,
-              asset: tx.asset,
-              amount: Number(tx.amount),
-            })),
-            previousLabel: prev.length === 0 ? 'Genesis' : `Block #${prev.length}`,
-            worldStateChanges: stateChanges,
-          },
-        ])
-      } else {
-        setCommittedBlocks((prev) => [
-          ...prev,
-          {
-            number: prev.length + 1,
-            transaction: scenario.initialTx,
-            previousLabel: prev.length === 0 ? 'Genesis' : `Block #${prev.length}`,
-            worldStateChanges: stateChanges,
-          },
-        ])
-      }
+    if (scenario.transactions) {
+      const blockData = accumulatedChanges.committedBlock as
+        | { transactions: Array<{ from: string; to: string; asset: string; amount: string }>; rejectedTransactionIds: string[] }
+        | undefined
+      const capturedStateChanges = stateChanges
+
+      setCommittedBlocks((prev) => [
+        ...prev,
+        {
+          number: prev.length + 1,
+          transaction: scenario.initialTx,
+          transactions: blockData?.transactions?.map((tx) => ({
+            from: tx.from,
+            to: tx.to,
+            asset: tx.asset,
+            amount: Number(tx.amount),
+          })),
+          previousLabel: prev.length === 0 ? 'Genesis' : `Block #${prev.length}`,
+          worldStateChanges: capturedStateChanges,
+        },
+      ])
+    } else {
+      const capturedStateChanges = stateChanges
+
+      setCommittedBlocks((prev) => [
+        ...prev,
+        {
+          number: prev.length + 1,
+          transaction: scenario.initialTx,
+          previousLabel: prev.length === 0 ? 'Genesis' : `Block #${prev.length}`,
+          worldStateChanges: capturedStateChanges,
+        },
+      ])
     }
-  }, [isSimulationOpen, isComplete, scenario.initialTx, scenario.transactions, accumulatedChanges, stateChanges])
+  }
 
   const handleSend = useCallback(() => {
-    hasRecordedRunRef.current = false
     startSimulation()
   }, [startSimulation])
 
   const handleMakeAnotherTransaction = useCallback(() => {
-    hasRecordedRunRef.current = false
+    setHasCommittedThisRun(false)
     send({ type: 'RESET' })
     closeSimulation()
   }, [send, closeSimulation])
 
   const handleResetUC01 = useCallback(() => {
-    hasRecordedRunRef.current = false
+    setHasCommittedThisRun(false)
     send({ type: 'RESET' })
     closeSimulation()
   }, [send, closeSimulation])

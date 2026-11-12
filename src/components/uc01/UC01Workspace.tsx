@@ -70,20 +70,6 @@ function cap(s: string) {
   return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1)
 }
 
-/** Which pipeline "stage bucket" a componentId maps to (0-based, matches lifecycle step index). */
-const COMPONENT_STAGE: Record<string, number> = {
-  torii: 0,
-  'stateless-validation': 1,
-  'mst-processor': 2,
-  'peer-communication-service': 3,
-  'ordering-service': 4,
-  proposal: 5,
-  'stateful-validation': 6,
-  'verified-proposal': 7,
-  'block-creator': 8,
-  'yac-consensus': 9,
-  commit: 10,
-}
 
 const LIFECYCLE_STEPS = [
   'Submit Transactions',
